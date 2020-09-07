@@ -51,7 +51,7 @@ def get_backoff():
     return math.ceil(FRED_API_RATE_RESET - time.time() % 60)
 
 
-# TODO: This works decently for bursts of requests related to a single logical GET
+# TODO: This works decently for bursts of requests related to a single batch of data
 # that spans >120 offsets however handling resets for many subsequent requests is a 
 # bit... not working. A better approach likely involves threading and/or task queues.
 
@@ -141,7 +141,7 @@ class ApiTree(dict):
             parent, *child = ep.split("/", 1)
             newpath = self.setdefault(parent, ApiTree(self.url + '/' + parent))
             if len(child):
-                    newpath.add_endpoints(child[0])
+                newpath.add_endpoints(child[0])
             else:
                 newpath.is_endpoint = True
     
@@ -189,7 +189,7 @@ class AsyncClient(object):
         new._apitree = deepcopy(self._apitree)
         return new
 
-    async def get_async(self, jsonpath: jsonpath_rw.jsonpath.JSONPath = None, **parameters) -> list:
+    async def get_async(self, jsonpath: str = None, **parameters) -> list:
         """
         Get data within an asynchronous request session
 
