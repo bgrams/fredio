@@ -62,7 +62,7 @@ class RateLimiter(asyncio.Semaphore):
             backoff = get_backoff()
             logging.debug("Rate limiter exhausted. Resetting in %s seconds" % backoff)
             await asyncio.sleep(backoff)
-        return await super().acquire()
+        return await super(RateLimiter, self).acquire()
 
 
 ratelimiter = RateLimiter(FRED_API_RATE_LIMIT)
@@ -172,13 +172,13 @@ class AsyncClient(object):
         Hijack to allow for dot notation to access API endpoints
         """
         try:
-            return super().__getattribute__(name)
+            return super(AsyncClient, self).__getattribute__(name)
         except AttributeError:
             if name not in self._apitree.keys():
                 raise
 
             new = self.copy()
-            new._apitree = self._apitree[name]
+            new._apitree = new._apitree[name]
             return new
 
     def copy(self):
@@ -222,6 +222,8 @@ class AsyncClient(object):
             response_limit = initial_response.get("limit")
             response_offset = initial_response.get("offset")
 
+            logging.debug("Count: %s, Limit: %s, Offset: %s" % (response_count, response_limit, response_offset))
+
             results = [initial_response]
 
             if (response_count is not None 
@@ -236,7 +238,9 @@ class AsyncClient(object):
                     newparams["offset"] = offset
                     coros.append(request_async(**newparams))
 
-                results.extend(await asyncio.gather(*coros))
+                if coros:
+                    logging.debug("Planning %s additional requests" % len(coros))
+                    results.extend(await asyncio.gather(*coros))
 
             if jsonpath:
                 jparsed = jsonpath_rw.parse(jsonpath)
