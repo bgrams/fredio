@@ -9,13 +9,13 @@ Asynchronous python client for the FRED® API
 
 ---
 ### Important:
-This library is _very_ alpha and at this time should not be considered production-ready. The interface has intentionally been kept very simple but is subject to change. Client-side rate limiting is also not fantastic and 429 response codes are still possible, so please use this library responsibly and don't spam the FRED servers or else they'll revoke your API key :)
+This library is _very_ alpha and at this time should not be considered production-ready. The interface has intentionally been kept very simple but is subject to change. Client-side rate limiting is also not fantastic and 429 response codes are unlikely however still possible, so please use this library responsibly and don't spam the FRED servers because a) be nice and b) they'll revoke your API key :)
 
 ### Overview:
 
 The interface consists of a single `Client` object built around [aiohttp](https://github.com/aio-libs/aiohttp). This object provides access to all of the available [FRED API endpoints](https://fred.stlouisfed.org/docs/api/fred/#API) as object attributes, and will plan and asynchronously execute requests. Results can be returned as:
 
-1. awaitable futures - `client.get_async()`
+1. awaitable coroutine - `client.get_async()`
 2. json dictionaries (blocking) - `client.get()`
 3. pandas DataFrames (blocking) - `client.get_pandas()`
 

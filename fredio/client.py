@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import math
-import urllib
 import re
 import time
 import webbrowser
@@ -10,8 +9,9 @@ from copy import deepcopy
 import aiohttp
 import jsonpath_rw
 import pandas as pd
-
 from aiohttp.client_exceptions import ClientError
+
+from .utils import generate_offsets, prepare_url
 
 
 FRED_API_URL = "https://api.stlouisfed.org/fred"
@@ -35,48 +35,57 @@ FRED_API_FILE_TYPE = "json"  # other XML option but we dont want that
 logger = logging.getLogger(__name__)
 
 
-def generate_offsets(count: int, limit: int, offset: int):
+class RateLimiter(asyncio.BoundedSemaphore):
     """
-    Generator yielding new offsets 
-    """
-    while offset + limit < count:
-        offset += limit
-        yield count, limit, offset
+    Rate-limiting implementation using a BoundedSemaphore to block when all locks
+    are acquired. Locks are only released on a specified interval via the `replenish`
+    method which runs as a background task. 
 
-
-def get_backoff():
-    """
-    Get number of seconds (ceiling) until the server-side rate limiter resets
-    """
-    return math.ceil(FRED_API_RATE_RESET - time.time() % 60)
-
-
-# TODO: This works decently for bursts of requests related to a single batch of data
-# that spans >120 offsets however handling resets for many subsequent requests is a 
-# bit... not working. A better approach likely involves threading and/or task queues.
-
-class RateLimiter(asyncio.Semaphore):
-
-    async def acquire(self):
-        if self.locked():
-            backoff = get_backoff()
-            logging.debug("Rate limiter exhausted. Resetting in %s seconds" % backoff)
-            await asyncio.sleep(backoff)
-        return await super(RateLimiter, self).acquire()
-
-
-ratelimiter = RateLimiter(FRED_API_RATE_LIMIT)
-
-
-def prepare_url(url: str, parameters: dict = None, safe_chars: str = ",;"):
-    """
-    Encode a url with parameters
+    https://stackoverflow.com/a/48685838
     """
 
-    if parameters is not None:
-        parameters = dict(parameters)
-        return url + "?" + urllib.parse.urlencode(parameters, safe=safe_chars)
-    return url
+    def __init__(self, value: int = 1, period: int = 1, *, loop=None):
+        super(RateLimiter, self).__init__(value, loop=loop)
+        self._period = period
+        self._loop.create_task(self.replenish())
+    
+    def get_backoff(self):
+        """
+        Get number of seconds until the next replenishment
+        TODO: Handle clock sync between client and server
+        """
+        return math.ceil(self._period - time.time() % self._period)
+    
+    def get_counter(self):
+        """
+        Get number of periods since the epoch
+        """
+        return time.time() // self._period
+
+    async def replenish(self):
+        """
+        Run a continuous loop to periodically release all locks
+        """
+        counter = self.get_counter()
+
+        while True:
+            new_counter = self.get_counter()
+            if new_counter > counter:
+                logger.debug("Replenishing (n: %d epoch: %d)" % (self._bound_value, new_counter))
+                while self._value < self._bound_value:
+                    super(RateLimiter, self).release()
+                counter = new_counter
+            else:
+                await asyncio.sleep(1)
+
+    def release(self):
+        """
+        No-op override, releases are periodically handled by `replenish()`
+        """
+        pass
+
+
+ratelimiter = RateLimiter(FRED_API_RATE_LIMIT, FRED_API_RATE_RESET)
 
 
 async def request_async(session: aiohttp.ClientSession, method: str, url: str, retries: int = 0, **parameters):
@@ -97,21 +106,21 @@ async def request_async(session: aiohttp.ClientSession, method: str, url: str, r
 
         async with ratelimiter:
 
-            logging.debug("%s %s" % (method, req_url))
+            logger.debug("%s %s" % (method, req_url))
             async with session.request(method, req_url) as response:
                 try:
                     response.raise_for_status()
                     return await response.json()
                 except ClientError as e:
-                    logging.error(e)
+                    logger.error(e)
 
                     errors += 1
                     if errors > retries:
                         raise
                     
                     if response.status == 429:
-                        backoff = get_backoff()
-                        logging.debug("Retrying request in %s seconds" % backoff)
+                        backoff = ratelimiter.get_backoff()
+                        logger.debug("Retrying request in %s seconds" % backoff)
                         await asyncio.sleep(backoff)
                     else:
                         raise
@@ -122,8 +131,9 @@ class ApiTree(dict):
     Tree-based kv structure containing a top level API domain and related endpoints
     """
 
-    def __init__(self, url: str, *endpoints):
-        self.url = url.rstrip("/")
+    def __init__(self, url: str, *endpoints, delimiter: str = "/"):
+        self.delimiter = delimiter
+        self.url = url.rstrip(self.delimiter)
         self.is_endpoint = False
         self.add_endpoints(*endpoints)
 
@@ -138,8 +148,8 @@ class ApiTree(dict):
         Add an endpoint to the tree
         """
         for ep in endpoints:
-            parent, *child = ep.split("/", 1)
-            newpath = self.setdefault(parent, ApiTree(self.url + '/' + parent))
+            parent, *child = ep.split(self.delimiter, 1)
+            newpath = self.setdefault(parent, ApiTree(self.url + self.delimiter + parent))
             if len(child):
                 newpath.add_endpoints(child[0])
             else:
@@ -222,7 +232,7 @@ class AsyncClient(object):
             response_limit = initial_response.get("limit")
             response_offset = initial_response.get("offset")
 
-            logging.debug("Count: %s, Limit: %s, Offset: %s" % (response_count, response_limit, response_offset))
+            logger.debug("Count: %s, Limit: %s, Offset: %s" % (response_count, response_limit, response_offset))
 
             results = [initial_response]
 
@@ -239,7 +249,7 @@ class AsyncClient(object):
                     coros.append(request_async(**newparams))
 
                 if coros:
-                    logging.debug("Planning %s additional requests" % len(coros))
+                    logger.debug("Planning %s additional requests" % len(coros))
                     results.extend(await asyncio.gather(*coros))
 
             if jsonpath:
@@ -271,7 +281,7 @@ class AsyncClient(object):
         else:
             groups = re.match(fr"({FRED_API_URL})?/?(.*)", endpoint).groups()
             docurl = f"{FRED_DOC_URL}/{groups[1].replace('/', '_')}.html"
-        webbrowser.open_new_tab(docurl)
+        return webbrowser.open_new_tab(docurl)
     
     @property
     def docs(self):
