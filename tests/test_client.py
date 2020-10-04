@@ -1,8 +1,9 @@
 import os
 import unittest
 import types
+import webbrowser
 
-from pandas import DataFrame 
+from pandas import DataFrame
 from fredio import Client
 
 
@@ -27,9 +28,13 @@ class TestAsyncClient(unittest.TestCase):
     def test_get_pandas(self):
         response = self.client.series.get_pandas(series_id="EFFR")
         self.assertIsInstance(response, DataFrame)
-    
+
     def test_open_docs(self):
-        self.assertTrue(self.client.series.docs())
+        try:
+            webbrowser.get()  # Will raise if no browser available
+            self.assertTrue(self.client.series.docs())
+        except webbrowser.Error as e:
+            raise unittest.SkipTest(e)
 
 
 if __name__ == "__main__":

@@ -19,8 +19,8 @@ FRED_DOC_URL = "https://fred.stlouisfed.org/docs/api/fred"
 
 FRED_API_ENDPOINTS = (
     "category", "category/children", "category/related", "category/series",
-    "category/tags", "category/related_tags", "releases", "releases/dates", 
-    "release", "release/dates", "release/series", "release/sources", "release/tags", 
+    "category/tags", "category/related_tags", "releases", "releases/dates",
+    "release", "release/dates", "release/series", "release/sources", "release/tags",
     "release/related_tags", "release/tables", "series", "series/categories",
     "series/observations", "series/release", "series/search", "series/search/tags",
     "series/search/related_tags", "series/tags", "series/updates", "series/vintagedates",
@@ -39,7 +39,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
     """
     Rate-limiting implementation using a BoundedSemaphore to block when all locks
     are acquired. Locks are only released on a specified interval via the `replenish`
-    method which runs as a background task. 
+    method which runs as a background task.
 
     https://stackoverflow.com/a/48685838
     """
@@ -48,14 +48,14 @@ class RateLimiter(asyncio.BoundedSemaphore):
         super(RateLimiter, self).__init__(value, loop=loop)
         self._period = period
         self._loop.create_task(self.replenish())
-    
+
     def get_backoff(self):
         """
         Get number of seconds until the next replenishment
         TODO: Handle clock sync between client and server
         """
         return math.ceil(self._period - time.time() % self._period)
-    
+
     def get_counter(self):
         """
         Get number of periods since the epoch
@@ -117,7 +117,7 @@ async def request_async(session: aiohttp.ClientSession, method: str, url: str, r
                     errors += 1
                     if errors > retries:
                         raise
-                    
+
                     if response.status == 429:
                         backoff = ratelimiter.get_backoff()
                         logger.debug("Retrying request in %s seconds" % backoff)
@@ -139,10 +139,10 @@ class ApiTree(dict):
 
     def __str__(self):
         return str(self.url)
-    
+
     def __repr__(self):
         return f'{self.__class__.__name__} <{self}>'
-    
+
     def add_endpoints(self, *endpoints):
         """
         Add an endpoint to the tree
@@ -154,7 +154,7 @@ class ApiTree(dict):
                 newpath.add_endpoints(child[0])
             else:
                 newpath.is_endpoint = True
-    
+
     def get_endpoints(self) -> list:
         """
         Get all endpoints from the tree
@@ -212,7 +212,7 @@ class AsyncClient(object):
         """
 
         async with aiohttp.ClientSession() as session:
-            
+
             methparams = {
                 "method": "GET",
                 "url": str(self._apitree),
@@ -227,8 +227,8 @@ class AsyncClient(object):
             # for better coro planning. This may not be necessary pending enhancements to
             # the client-side rate limiter.
             initial_response = await request_async(**methparams)
-            
-            response_count = initial_response.get("count")            
+
+            response_count = initial_response.get("count")
             response_limit = initial_response.get("limit")
             response_offset = initial_response.get("offset")
 
@@ -236,10 +236,10 @@ class AsyncClient(object):
 
             results = [initial_response]
 
-            if (response_count is not None 
-                and response_limit is not None 
+            if (response_count is not None
+                and response_limit is not None
                 and response_offset is not None):
-            
+
                 offsets = generate_offsets(response_count, response_limit, response_offset)
 
                 coros = []
@@ -282,7 +282,7 @@ class AsyncClient(object):
             groups = re.match(fr"({FRED_API_URL})?/?(.*)", endpoint).groups()
             docurl = f"{FRED_DOC_URL}/{groups[1].replace('/', '_')}.html"
         return webbrowser.open_new_tab(docurl)
-    
+
     @property
     def docs(self):
         return self.open_documentation

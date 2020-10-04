@@ -10,7 +10,7 @@ class TestUtils(unittest.TestCase):
         # Special chars should be protected from encoding
         url = utils.prepare_url("foo.com", parameters={"x": "5", "y": "1,2"})
         self.assertEqual(url, "foo.com?x=5&y=1,2")
-    
+
     def test_generate_offsets(self):
         offsets = [i for i in utils.generate_offsets(2, 1, 0)]
         self.assertListEqual(offsets, [(2, 1, 1)])
@@ -26,6 +26,7 @@ class TestUtils(unittest.TestCase):
             msg="message api_key=12345")
         fmt = utils.KeyMaskFormatter().format(record=rec)
         self.assertEqual(fmt, "message api_key=<masked>")
+
 
 if __name__ == "__main__":
     unittest.main()

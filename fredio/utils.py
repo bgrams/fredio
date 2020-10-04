@@ -20,7 +20,7 @@ class KeyMaskFormatter(logging.Formatter):
 
 def generate_offsets(count: int, limit: int, offset: int):
     """
-    Generator yielding new offsets 
+    Generator yielding new offsets
     """
     while offset + limit < count:
         offset += limit
@@ -36,4 +36,3 @@ def prepare_url(url: str, parameters: dict = None, safe_chars: str = ",;"):
         parameters = dict(parameters)
         return url + "?" + urllib.parse.urlencode(parameters, safe=safe_chars)
     return url
-
