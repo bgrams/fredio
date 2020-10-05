@@ -4,6 +4,7 @@ import math
 import re
 import time
 import webbrowser
+from collections import deque
 from copy import deepcopy
 
 import aiohttp
@@ -48,6 +49,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
         super(RateLimiter, self).__init__(value, loop=loop)
         self._period = period
         self._loop.create_task(self.replenish())
+        self._releases = deque()
 
     def get_backoff(self):
         """
@@ -69,20 +71,34 @@ class RateLimiter(asyncio.BoundedSemaphore):
         counter = self.get_counter()
 
         while True:
+
             new_counter = self.get_counter()
             if new_counter > counter:
-                logger.debug("Replenishing (n: %d epoch: %d)" % (self._bound_value, new_counter))
-                while self._value < self._bound_value:
-                    super(RateLimiter, self).release()
+
+                logger.debug("Replenishing (epoch: %d waiting: %d)" % (new_counter, len(self._releases)))
+
+                while self._releases:
+
+                    # Use comparator to control for a situation where a lock may be acquired
+                    # while replenishment is running
+                    if new_counter > self._releases[0][1]:
+                        super(RateLimiter, self).release()
+                        ts, ct = self._releases.popleft()
+
+                        elapsed = time.time() - ts
+                        message = "Released lock from epoch %d (elapsed: %.4f)" % (ct, elapsed)
+                        logger.debug(message)
+                    else:
+                        break
+
                 counter = new_counter
-            else:
-                await asyncio.sleep(1)
+            await asyncio.sleep(0)
 
     def release(self):
         """
-        No-op override, releases are periodically handled by `replenish()`
+        Delayed override, releases are periodically handled by `replenish()`
         """
-        pass
+        self._releases.append((time.time(), self.get_counter()))
 
 
 ratelimiter = RateLimiter(FRED_API_RATE_LIMIT, FRED_API_RATE_RESET)
