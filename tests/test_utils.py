@@ -8,7 +8,7 @@ class TestUtils(unittest.TestCase):
 
     def test_prepare_url(self):
         # Special chars should be protected from encoding
-        url = utils.prepare_url("foo.com", parameters={"x": "5", "y": "1,2"})
+        url = utils.prepare_url("foo.com", x=5, y="1,2")
         self.assertEqual(url, "foo.com?x=5&y=1,2")
 
     def test_generate_offsets(self):

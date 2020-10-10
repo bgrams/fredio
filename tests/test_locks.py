@@ -1,9 +1,8 @@
 import asyncio
 import sys
-import time
 import unittest
 
-from fredio.client import RateLimiter
+from fredio.locks import RateLimiter
 
 if sys.version_info < (3, 7, 0):
     get_async_tasks = asyncio.Task.all_tasks
@@ -11,15 +10,16 @@ else:
     get_async_tasks = asyncio.all_tasks
 
 
-class TestRateLimiting(unittest.TestCase):
+class TestDefaultRateLimiting(unittest.TestCase):
 
-    period = 1
-    ratelimiter = None
+    period = 0.25
     rate = 2
+    timer = "system"
 
     def setUp(self):
         self.loop = asyncio.get_event_loop()
-        self.ratelimiter = RateLimiter(self.rate, self.period)
+        self.ratelimiter = RateLimiter(self.rate, self.period, self.timer)
+        self.ratelimiter.start()
 
     def test_replenishment_task_exists(self):
         # No other tasks should be running at this point, however in 3.8
@@ -34,8 +34,8 @@ class TestRateLimiting(unittest.TestCase):
         self.assertAlmostEqual(backoff, 1)
 
     def test_get_rate_limiter_counter(self):
-        timestamp, counter = time.time(), self.ratelimiter.get_counter()
-        self.assertAlmostEqual(counter, int(timestamp))
+        timestamp, counter = self.ratelimiter._timer(), self.ratelimiter.get_counter() * self.period
+        self.assertAlmostEqual(int(counter), int(timestamp))
 
     def test_acquire_release(self):
 
@@ -51,8 +51,21 @@ class TestRateLimiting(unittest.TestCase):
 
         self.loop.run_until_complete(acquire_release())
 
-    def tearDown(self):
-        self.loop.stop()
+
+# We expect the exact same functional behavior as with the default timer.
+class TestMonotonicRateLimiting(TestDefaultRateLimiting):
+    timer = "monotonic"
+
+
+class TetRatelimiterExceptions(unittest.TestCase):
+    def test_value_error_invalid_clock(self):
+        with self.assertRaises(ValueError):
+            RateLimiter(timer="invalid")
+
+    def test_runtime_error_acquire_not_started(self):
+        with self.assertRaises(RuntimeError):
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(RateLimiter(1, 1).acquire())
 
 
 if __name__ == "__main__":

@@ -36,6 +36,17 @@ class TestAsyncClient(unittest.TestCase):
         except webbrowser.Error as e:
             raise unittest.SkipTest(e)
 
+    def test_get_json_with_coro_planning(self):
+        # Example from official docs - https://fred.stlouisfed.org/docs/api/fred/releases.html
+        # This should pretty consistently only require ~2 requests with limit=200
+        response = self.client.releases.get(limit=200)
+        self.assertIsInstance(response, list)
+        self.assertIsInstance(response[0], dict)
+
+    def test_runtime_error_on_bad_request(self):
+        with self.assertRaises(RuntimeError):
+            self.client.series.get(series_id="NOT_VALID", retries=0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,12 +27,11 @@ def generate_offsets(count: int, limit: int, offset: int):
         yield count, limit, offset
 
 
-def prepare_url(url: str, parameters: dict = None, safe_chars: str = ",;"):
+def prepare_url(url: str, safe_chars: str = ",;", **parameters):
     """
     Encode a url with parameters
     """
 
     if parameters is not None:
-        parameters = dict(parameters)
         return url + "?" + urllib.parse.urlencode(parameters, safe=safe_chars)
     return url

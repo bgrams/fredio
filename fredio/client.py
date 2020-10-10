@@ -1,145 +1,22 @@
 import asyncio
 import logging
-import math
-import re
-import time
-import webbrowser
-from collections import deque
 from copy import deepcopy
+from typing import Dict, List
 
-import aiohttp
 import jsonpath_rw
 import pandas as pd
-from aiohttp.client_exceptions import ClientError
+from aiohttp import ClientSession
+from aiohttp.typedefs import StrOrURL
 
+from .locks import ratelimiter
 from .utils import generate_offsets, prepare_url
-
-
-FRED_API_URL = "https://api.stlouisfed.org/fred"
-FRED_DOC_URL = "https://fred.stlouisfed.org/docs/api/fred"
-
-FRED_API_ENDPOINTS = (
-    "category", "category/children", "category/related", "category/series",
-    "category/tags", "category/related_tags", "releases", "releases/dates",
-    "release", "release/dates", "release/series", "release/sources", "release/tags",
-    "release/related_tags", "release/tables", "series", "series/categories",
-    "series/observations", "series/release", "series/search", "series/search/tags",
-    "series/search/related_tags", "series/tags", "series/updates", "series/vintagedates",
-    "sources", "source", "source/releases", "tags", "tags/series", "related_tags"
-)
-
-FRED_API_RATE_LIMIT = 120
-FRED_API_RATE_RESET = 60
-FRED_API_FILE_TYPE = "json"  # other XML option but we dont want that
+from .enums import (FRED_API_URL,
+                    FRED_DOC_URL,
+                    FRED_API_FILE_TYPE,
+                    FRED_API_ENDPOINTS)
 
 
 logger = logging.getLogger(__name__)
-
-
-class RateLimiter(asyncio.BoundedSemaphore):
-    """
-    Rate-limiting implementation using a BoundedSemaphore to block when all locks
-    are acquired. Locks are only released on a specified interval via the `replenish`
-    method which runs as a background task.
-
-    https://stackoverflow.com/a/48685838
-    """
-
-    def __init__(self, value: int = 1, period: int = 1, *, loop=None):
-        super(RateLimiter, self).__init__(value, loop=loop)
-        self._period = period
-        self._loop.create_task(self.replenish())
-        self._releases = deque()
-
-    def get_backoff(self):
-        """
-        Get number of seconds until the next replenishment
-        TODO: Handle clock sync between client and server
-        """
-        return math.ceil(self._period - time.time() % self._period)
-
-    def get_counter(self):
-        """
-        Get number of periods since the epoch
-        """
-        return time.time() // self._period
-
-    async def replenish(self):
-        """
-        Run a continuous loop to periodically release all locks
-        """
-        counter = self.get_counter()
-
-        while True:
-
-            new_counter = self.get_counter()
-            if new_counter > counter:
-
-                logger.debug("Replenishing (epoch: %d waiting: %d)" % (new_counter, len(self._releases)))
-
-                while self._releases:
-
-                    # Use comparator to control for a situation where a lock may be acquired
-                    # while replenishment is running
-                    if new_counter > self._releases[0][1]:
-                        super(RateLimiter, self).release()
-                        ts, ct = self._releases.popleft()
-
-                        elapsed = time.time() - ts
-                        message = "Released lock from epoch %d (elapsed: %.4f)" % (ct, elapsed)
-                        logger.debug(message)
-                    else:
-                        break
-
-                counter = new_counter
-            await asyncio.sleep(0)
-
-    def release(self):
-        """
-        Delayed override, releases are periodically handled by `replenish()`
-        """
-        self._releases.append((time.time(), self.get_counter()))
-
-
-ratelimiter = RateLimiter(FRED_API_RATE_LIMIT, FRED_API_RATE_RESET)
-
-
-async def request_async(session: aiohttp.ClientSession, method: str, url: str, retries: int = 0, **parameters):
-    """
-    Async sessioned request wrapper with rate limiting (FIXME!!) and retry logic
-
-    :param session: request session instance
-    :param method: HTTP method
-    :param url: url
-    :param retries: number of request retries
-    :param parameters: arbitrary HTTP parameters
-    """
-
-    req_url = prepare_url(url, parameters)
-
-    errors = 0
-    while True:
-
-        async with ratelimiter:
-
-            logger.debug("%s %s" % (method, req_url))
-            async with session.request(method, req_url) as response:
-                try:
-                    response.raise_for_status()
-                    return await response.json()
-                except ClientError as e:
-                    logger.error(e)
-
-                    errors += 1
-                    if errors > retries:
-                        raise
-
-                    if response.status == 429:
-                        backoff = ratelimiter.get_backoff()
-                        logger.debug("Retrying request in %s seconds" % backoff)
-                        await asyncio.sleep(backoff)
-                    else:
-                        raise
 
 
 class ApiTree(dict):
@@ -152,9 +29,6 @@ class ApiTree(dict):
         self.url = url.rstrip(self.delimiter)
         self.is_endpoint = False
         self.add_endpoints(*endpoints)
-
-    def __str__(self):
-        return str(self.url)
 
     def __repr__(self):
         return f'{self.__class__.__name__} <{self}>'
@@ -171,7 +45,7 @@ class ApiTree(dict):
             else:
                 newpath.is_endpoint = True
 
-    def get_endpoints(self) -> list:
+    def get_endpoints(self) -> List[str]:
         """
         Get all endpoints from the tree
         """
@@ -180,8 +54,8 @@ class ApiTree(dict):
             if isinstance(node, ApiTree):
                 endpoints.extend(node.get_endpoints())
         if self.is_endpoint:
-            endpoints.append(self)
-        return list(map(str, endpoints))
+            endpoints.append(self.url)
+        return endpoints
 
 
 apitree = ApiTree(FRED_API_URL, *FRED_API_ENDPOINTS)
@@ -189,9 +63,12 @@ apitree = ApiTree(FRED_API_URL, *FRED_API_ENDPOINTS)
 
 class AsyncClient(object):
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, **kwargs):
         self._api_key = api_key
         self._apitree = apitree
+
+        self._session_cls = ClientSession
+        self._session_kws = kwargs
 
     def __getattribute__(self, name: str):
         """
@@ -203,19 +80,67 @@ class AsyncClient(object):
             if name not in self._apitree.keys():
                 raise
 
-            new = self.copy()
+            new = self._copy()
             new._apitree = new._apitree[name]
             return new
 
-    def copy(self):
+    def _copy(self):
         """
         Copy
         """
         new = AsyncClient(self._api_key)
+        new._session_cls = self._session_cls
+        new._session_kws = dict(self._session_kws)
         new._apitree = deepcopy(self._apitree)
         return new
 
-    async def get_async(self, jsonpath: str = None, **parameters) -> list:
+    def _get_url(self, **kwargs) -> str:
+        return prepare_url(
+            self._apitree.url,
+            api_key=self._api_key,
+            file_type=FRED_API_FILE_TYPE,
+            **kwargs
+        )
+
+    @staticmethod
+    async def _request(
+                session: ClientSession,
+                method: str,
+                str_or_url: StrOrURL,
+                retries: int = 0,
+                **kwargs) -> dict:
+        """
+        Wraps ClientSession.request() with rate limiting and handles retry logic
+
+        :param session: Open client session
+        :param method: Request method
+        :param str_or_url: URL
+        :param retries: Maximum number of request retries
+        :param kwargs: Request parameters
+        """
+
+        ratelimiter.start()
+        async with ratelimiter:
+
+            attempts = 0
+            while attempts <= retries:
+                async with session.request(method, str_or_url, **kwargs) as response:
+                    try:
+                        response.raise_for_status()
+                        return await response.json()
+                    except Exception as e:
+                        logging.error(e)
+                        attempts += 1
+
+                    # TODO: pluggable handling
+                    if response.status == 429:
+                        backoff = ratelimiter.get_backoff()
+                        logger.debug("Retrying request in %d seconds", backoff)
+                        await asyncio.sleep(backoff)
+
+        raise RuntimeError("Client retries exceeded for url %s" % str_or_url)
+
+    async def get_async(self, jsonpath: str = None, retries: int = 3, **parameters) -> List[Dict]:
         """
         Get data within an asynchronous request session
 
@@ -227,53 +152,35 @@ class AsyncClient(object):
         :param parameters: HTTP request parameters
         """
 
-        async with aiohttp.ClientSession() as session:
+        async with self._session_cls(**self._session_kws) as session:
 
-            methparams = {
-                "method": "GET",
-                "url": str(self._apitree),
-                "session": session,
-                "retries": 3,  # TODO: parameterize this eventually. Dont want to get too wild for now.
-                "api_key": self._api_key,
-                "file_type": FRED_API_FILE_TYPE,
-                **parameters
-            }
+            init_url = self._get_url(**parameters)
+            init_response = await self._request(session, "GET", init_url, retries=retries)
 
-            # TODO: Return the response object object instead of json. Headers will allow
-            # for better coro planning. This may not be necessary pending enhancements to
-            # the client-side rate limiter.
-            initial_response = await request_async(**methparams)
+            results = [init_response]
 
-            response_count = initial_response.get("count")
-            response_limit = initial_response.get("limit")
-            response_offset = initial_response.get("offset")
+            ir_count = init_response.get("count")
+            ir_limit = init_response.get("limit")
+            ir_offset = init_response.get("offset")
 
-            logger.debug("Count: %s, Limit: %s, Offset: %s" % (response_count, response_limit, response_offset))
+            logger.debug("Count: %s, Limit: %s, Offset: %s" % (ir_count, ir_limit, ir_offset))
 
-            results = [initial_response]
+            if any((ir_count, ir_limit, ir_offset)):
 
-            if (response_count is not None
-                and response_limit is not None
-                and response_offset is not None):
+                coros = [
+                    self._request(session, "GET", self._get_url(offset=offset), retries=retries)
+                    for _, _, offset in generate_offsets(ir_count, ir_limit, ir_offset)
+                ]
 
-                offsets = generate_offsets(response_count, response_limit, response_offset)
+                logger.debug("Planning %s additional requests" % len(coros))
+                results.extend(await asyncio.gather(*coros))
 
-                coros = []
-                for count, limit, offset in offsets:
-                    newparams = dict(methparams)
-                    newparams["offset"] = offset
-                    coros.append(request_async(**newparams))
+        if jsonpath:
+            jparsed = jsonpath_rw.parse(jsonpath)
+            return list(map(lambda x: [i.value for i in jparsed.find(x)], results))
+        return results
 
-                if coros:
-                    logger.debug("Planning %s additional requests" % len(coros))
-                    results.extend(await asyncio.gather(*coros))
-
-            if jsonpath:
-                jparsed = jsonpath_rw.parse(jsonpath)
-                return list(map(lambda x: [i.value for i in jparsed.find(x)], results))
-            return results
-
-    def get(self, **kwargs) -> list:
+    def get(self, **kwargs) -> List[Dict]:
         """
         Get request results as a list. This method is blocking.
         """
@@ -286,19 +193,20 @@ class AsyncClient(object):
         """
         return pd.concat(map(pd.DataFrame, self.get(**kwargs)))
 
-    def open_documentation(self):
+    def open_documentation(self) -> bool:
         """
         Open official endpoint documentation in the browser
-        """
-        endpoint = str(self._apitree)
 
-        if endpoint == FRED_API_URL:
-            docurl = FRED_DOC_URL
-        else:
-            groups = re.match(fr"({FRED_API_URL})?/?(.*)", endpoint).groups()
-            docurl = f"{FRED_DOC_URL}/{groups[1].replace('/', '_')}.html"
-        return webbrowser.open_new_tab(docurl)
+        Endpoint mapping logic:
+        /fred/series/observations -> /fred/series_observations.html
+        """
+        import webbrowser
+
+        subpath = self._apitree.url.replace(FRED_API_URL, "").replace("/", "_")
+        if subpath:
+            subpath += ".html"
+        return webbrowser.open_new_tab(FRED_DOC_URL + "/" + subpath)
 
     @property
-    def docs(self):
+    def docs(self) -> bool:
         return self.open_documentation
