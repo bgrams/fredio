@@ -24,6 +24,14 @@ class ApiClient(dict):
 
         self.url = URL(url, encoded=True)
 
+    def __call__(self, **params) -> "ApiClient":
+        """
+        Return a new client object with updated query params
+        """
+        obj = copy(self)
+        obj._query = {**self._query, **params}
+        return obj
+
     def __getattribute__(self, item: Any) -> Any:
         """
         Hijack to allow for indexing using dot notation
@@ -36,7 +44,7 @@ class ApiClient(dict):
             return self[item]
 
     def __repr__(self):  # pragma: no-cover
-        return f'{self.__class__.__name__} <{self.url}>'
+        return f'{self.__class__.__name__}<{self.url}>'
 
     @classmethod
     def set_defaults(cls, **params) -> None:
@@ -44,14 +52,6 @@ class ApiClient(dict):
         Set default query parameters for all endpoints
         """
         cls._query.update(params)
-
-    def query(self, **params) -> "ApiClient":
-        """
-        Update instance query params
-        """
-        obj = copy(self)
-        obj._query = {**self._query, **params}
-        return obj
 
     def encode_url(self, safe_chars: str = ",;") -> URL:
         """
@@ -84,5 +84,5 @@ def get_endpoints(tree: ApiClient) -> List[str]:
     return endpoints
 
 
-apitree = ApiClient(FRED_API_URL)
-add_endpoints(apitree, *FRED_API_ENDPOINTS)
+client = ApiClient(FRED_API_URL)
+add_endpoints(client, *FRED_API_ENDPOINTS)

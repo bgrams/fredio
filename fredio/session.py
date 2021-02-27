@@ -8,7 +8,7 @@ import pandas as pd
 from aiohttp import ClientSession
 from aiohttp.typedefs import StrOrURL
 
-from fredio.client import apitree, logger
+from fredio.client import client, logger
 from fredio.const import FRED_API_FILE_TYPE, FRED_API_URL, FRED_DOC_URL
 from fredio.locks import ratelimiter
 from fredio.utils import generate_offsets
@@ -18,7 +18,7 @@ class Session(object):
 
     def __init__(self, api_key: str, **kwargs):
         self._api_key = api_key
-        self._apitree = apitree
+        self._client = client
 
         self._session_cls = ClientSession
         self._session_kws = kwargs
@@ -30,11 +30,11 @@ class Session(object):
         try:
             return super(Session, self).__getattribute__(name)
         except AttributeError:
-            if name not in self._apitree.keys():
+            if name not in self._client.keys():
                 raise
 
             new = self._copy()
-            new._apitree = new._apitree[name]
+            new._client = new._client[name]
             return new
 
     def _copy(self):
@@ -44,14 +44,14 @@ class Session(object):
         new = Session(self._api_key)
         new._session_cls = self._session_cls
         new._session_kws = dict(self._session_kws)
-        new._apitree = deepcopy(self._apitree)
+        new._client = deepcopy(self._client)
         return new
 
     def _get_url(self, **kwargs) -> str:
-        return str(self._apitree
-                   .query(api_key=self._api_key,
-                          file_type=FRED_API_FILE_TYPE,
-                          **kwargs)
+        return str(self
+                   ._client(api_key=self._api_key,
+                            file_type=FRED_API_FILE_TYPE,
+                            **kwargs)
                    .encode_url())
 
     @staticmethod
@@ -154,7 +154,7 @@ class Session(object):
         """
         import webbrowser
 
-        subpath = str(self._apitree.url).replace(FRED_API_URL, "").replace("/", "_")
+        subpath = str(self._client.url).replace(FRED_API_URL, "").replace("/", "_")
         if subpath:
             subpath += ".html"
         return webbrowser.open_new_tab(FRED_DOC_URL + "/" + subpath)
