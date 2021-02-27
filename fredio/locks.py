@@ -1,11 +1,13 @@
+__all__ = ["get_rate_limiter", "set_rate_limit"]
+
 import asyncio
 import logging
 import math
 import time
 from collections import deque
 
-from .enums import FRED_API_RATE_LIMIT, FRED_API_RATE_RESET
-
+from . import const
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -15,37 +17,28 @@ class RateLimiter(asyncio.BoundedSemaphore):
     Rate-limiting implementation using a BoundedSemaphore to block when all locks
     are acquired. Locks are only released on a specified interval via the `replenish`
     method which runs as a background task.
-
-    Timer options:
-    default - time.time
-    - This is the most accurate model of what the server-side rate limiter is actually
-      doing, although locks can be released prematurely depending on time sync delta
-      between the server and the client
-    monotonic - time.monotonic
-    - Release mechanism will be scheduled according to a monotonic clock that doesn't
-      take system time into account. This means that replenishment will not nearly-sync
-      with the server, but is guaranteed to prevent premature releases.
     """
 
+    _bound_value: int
+    _loop: asyncio.BaseEventLoop
+
     def __init__(self,
-                 value: int = FRED_API_RATE_LIMIT,
-                 period: int = FRED_API_RATE_RESET,
-                 timer: str = "system",
+                 value: int = const.FRED_API_RATE_LIMIT,
+                 period: int = const.FRED_API_RATE_RESET,
                  *,
-                 loop=None):
+                 loop: asyncio.BaseEventLoop = utils.loop):
 
         super(RateLimiter, self).__init__(value, loop=loop)
 
         self._period = period
         self._releases = deque()
-        self._started = False
+        self._task = None
 
-        if timer == "system":
-            self._timer = time.time
-        elif timer == "monotonic":
-            self._timer = time.monotonic
-        else:
-            raise ValueError("Unknown timer option '%s' (choices: 'system', 'monotonic')" % timer)
+        self._timer = time.time
+
+    @property
+    def started(self) -> bool:
+        return self._task is not None
 
     def get_backoff(self) -> int:
         """
@@ -63,20 +56,24 @@ class RateLimiter(asyncio.BoundedSemaphore):
         """
         Create background replenishment task. Can be called idempotently.
         """
-        if not self._started:
-            self._loop.create_task(self.replenish())
-            self._started = True
+        if not self.started:
+            self._task = self._loop.create_task(self.replenish())
+        return True
+
+    def stop(self) -> bool:
+        if self.started:
+            self._task.cancel()
         return True
 
     async def acquire(self) -> bool:
         """
         Acquire a lock
         """
-        if not self._started:
+        if not self.started:
             raise RuntimeError("Rate limiter must be started via start()")
         return await super(RateLimiter, self).acquire()
 
-    async def replenish(self):
+    async def replenish(self) -> None:
         """
         Run a continuous loop to periodically release all locks from a previous epoch.
 
@@ -108,11 +105,36 @@ class RateLimiter(asyncio.BoundedSemaphore):
                 counter = new_counter
             await asyncio.sleep(0)
 
-    def release(self):
+    def release(self) -> None:
         """
         Delayed override, releases are periodically handled by `replenish()`
         """
         self._releases.append((self._timer(), self.get_counter()))
 
 
-ratelimiter = RateLimiter()
+_ratelimiter = RateLimiter()
+
+
+def get_rate_limiter() -> RateLimiter:
+    """
+    Get the global ratelimiter
+    """
+    return _ratelimiter
+
+
+def set_rate_limit(limit: int) -> bool:
+    """
+    Reset the global ratelimiter with a new limit.
+
+    Not threadsafe
+    """
+    if limit > const.FRED_API_RATE_LIMIT:
+        raise ValueError("Limit must be <= %d" % const.FRED_API_RATE_LIMIT)
+
+    global _ratelimiter
+
+    _ratelimiter.stop()
+    _ratelimiter = RateLimiter(limit)
+    _ratelimiter.start()
+
+    return True

@@ -1,5 +1,11 @@
+import asyncio
 import logging
 import re
+import sys
+from typing import Generator, Set, Tuple
+
+# Main thread event loop
+loop = asyncio.get_event_loop()
 
 
 class KeyMaskFormatter(logging.Formatter):
@@ -17,10 +23,20 @@ class KeyMaskFormatter(logging.Formatter):
         return self._filter(original)
 
 
-def generate_offsets(count: int, limit: int, offset: int):
+def generate_offsets(count: int, limit: int, offset: int) -> Generator[Tuple[int, int, int], None, None]:
     """
     Generator yielding new offsets
     """
     while offset + limit < count:
         offset += limit
         yield count, limit, offset
+
+
+def get_all_tasks() -> Set[asyncio.Task]:
+    """
+    Get all tasks from main event loop
+    """
+    if sys.version_info < (3, 7, 0):
+        return asyncio.Task.all_tasks(loop=loop)
+    else:
+        return asyncio.all_tasks(loop=loop)

@@ -22,6 +22,9 @@ class TestUtils(unittest.TestCase):
         fmt = utils.KeyMaskFormatter().format(record=rec)
         self.assertEqual(fmt, "message api_key=<masked>")
 
+    def test_get_tasks(self):
+        self.assertIsInstance(utils.get_all_tasks(), set)
+
 
 if __name__ == "__main__":
     unittest.main()

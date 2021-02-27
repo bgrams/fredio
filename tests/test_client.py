@@ -1,51 +1,30 @@
-import os
 import unittest
-import types
-import webbrowser
+from yarl import URL
 
-from pandas import DataFrame
-from fredio import Client
+from fredio.client import ApiClient, add_endpoints, get_endpoints
 
 
-class TestAsyncClient(unittest.TestCase):
+class TestApiClient(unittest.TestCase):
 
-    client = None
+    def setUp(self):
+        self.client = ApiClient("foo.com")
+        add_endpoints(self.client, "fuzz", "bar/baz")
 
-    @classmethod
-    def setUpClass(cls):
-        cls.client = Client(api_key=os.environ["FRED_API_KEY"])
+    def test_add_endpoint(self):
+        self.assertIn("bar", self.client.children.keys())
+        self.assertIsInstance(self.client.children["bar"], ApiClient)
+        self.assertIn("baz", self.client.children["bar"].children.keys())
 
-    def test_get_async(self):
-        response = self.client.series.get_async(series_id="EFFR")
-        self.assertIsInstance(response, types.CoroutineType)
-        response.close()
+    def test_get_endpoint(self):
+        endpoints = get_endpoints(self.client)
+        self.assertIsInstance(endpoints, list)
+        self.assertIn(URL("foo.com/fuzz"), endpoints)
+        self.assertIn(URL("foo.com/bar/baz"), endpoints)
 
-    def test_get_json(self):
-        response = self.client.series.get(series_id="EFFR")
-        self.assertIsInstance(response, list)
-        self.assertIsInstance(response[0], dict)
-
-    def test_get_pandas(self):
-        response = self.client.series.get_pandas(series_id="EFFR")
-        self.assertIsInstance(response, DataFrame)
-
-    def test_open_docs(self):
-        try:
-            webbrowser.get()  # Will raise if no browser available
-            self.assertTrue(self.client.series.docs())
-        except webbrowser.Error as e:
-            raise unittest.SkipTest(e)
-
-    def test_get_json_with_coro_planning(self):
-        # Example from official docs - https://fred.stlouisfed.org/docs/api/fred/releases.html
-        # This should pretty consistently only require ~2 requests with limit=200
-        response = self.client.releases.get(limit=200)
-        self.assertIsInstance(response, list)
-        self.assertIsInstance(response[0], dict)
-
-    def test_runtime_error_on_bad_request(self):
-        with self.assertRaises(RuntimeError):
-            self.client.series.get(series_id="NOT_VALID", retries=0)
+    def test_url_encode(self):
+        # Special chars should be protected from encoding
+        self.client.set_defaults(x=5, y="1,2")
+        self.assertEqual(str(self.client.url), "foo.com?x=5&y=1,2")
 
 
 if __name__ == "__main__":
