@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from aiohttp.typedefs import StrOrURL
 from yarl import URL
 
-from fredio.const import FRED_API_URL, FRED_API_ENDPOINTS
+from fredio.const import FRED_API_URL, FRED_DOC_URL, FRED_API_ENDPOINTS
 
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class ApiClient(dict):
     def __init__(self, url: StrOrURL):
         super(ApiClient, self).__init__()
 
-        self.url = URL(url, encoded=True)
+        self._url = URL(url, encoded=True)
 
     def __call__(self, **params) -> "ApiClient":
         """
@@ -53,12 +53,43 @@ class ApiClient(dict):
         """
         cls._query.update(params)
 
-    def encode_url(self, safe_chars: str = ",;") -> URL:
+    @property
+    def docs(self):
+        return _ApiDocs(self._url)
+
+    @property
+    def url(self):
         """
-        Encode URL. Safe chars are not encoded.
+        Combine URL and query
         """
-        query = urllib.parse.urlencode(self._query, safe=safe_chars)
-        return self.url.with_query(query)
+
+        # safe_chars is hard-coded as these chars are used for tag requests etc
+        query = urllib.parse.urlencode(self._query, safe=",;")
+        return self._url.with_query(query)
+
+
+class _ApiDocs:
+    def __init__(self, url):
+        self.url = url
+
+    def open(self):
+        """
+        Open official endpoint documentation in the browser
+
+        Endpoint mapping logic:
+        /fred/series/observations -> /fred/series_observations.html
+        """
+
+        import webbrowser
+
+        subpath = (self.url.path
+                   .replace("/fred", "")
+                   .lstrip("/")
+                   .replace("/", "_"))
+        if subpath:
+            subpath += ".html"
+        docurl = URL(FRED_DOC_URL) / subpath
+        return webbrowser.open_new_tab(str(docurl))
 
 
 def add_endpoints(tree: ApiClient, *endpoints) -> None:

@@ -9,7 +9,7 @@ from aiohttp import ClientSession
 from aiohttp.typedefs import StrOrURL
 
 from fredio.client import client, logger
-from fredio.const import FRED_API_FILE_TYPE, FRED_API_URL, FRED_DOC_URL
+from fredio.const import FRED_API_FILE_TYPE
 from fredio.locks import ratelimiter
 from fredio.utils import generate_offsets
 
@@ -48,11 +48,10 @@ class Session(object):
         return new
 
     def _get_url(self, **kwargs) -> str:
-        return str(self
-                   ._client(api_key=self._api_key,
-                            file_type=FRED_API_FILE_TYPE,
-                            **kwargs)
-                   .encode_url())
+        _client = self._client(api_key=self._api_key,
+                               file_type=FRED_API_FILE_TYPE,
+                               **kwargs)
+        return _client.url
 
     @staticmethod
     async def _request(
@@ -144,19 +143,3 @@ class Session(object):
         Get request results as a DataFrame. This method is blocking.
         """
         return pd.concat(map(pd.DataFrame, self.get(**kwargs)))
-
-    def open_documentation(self) -> bool:
-        """
-        Open official endpoint documentation in the browser
-
-        Endpoint mapping logic:
-        /fred/series/observations -> /fred/series_observations.html
-        """
-        import webbrowser
-
-        subpath = str(self._client.url).replace(FRED_API_URL, "").replace("/", "_")
-        if subpath:
-            subpath += ".html"
-        return webbrowser.open_new_tab(FRED_DOC_URL + "/" + subpath)
-
-    docs = open_documentation

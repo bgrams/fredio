@@ -1,6 +1,7 @@
 import unittest
+import webbrowser
 from yarl import URL
-from fredio.client import ApiClient, add_endpoints, get_endpoints
+from fredio.client import ApiClient, client, add_endpoints, get_endpoints
 
 
 class TestApiClient(unittest.TestCase):
@@ -24,8 +25,15 @@ class TestApiClient(unittest.TestCase):
 
     def test_url_encode(self):
         # Special chars should be protected from encoding
-        url = self.client(x=5, y="1,2").encode_url()
+        url = self.client(x=5, y="1,2").url
         self.assertEqual(str(url), "foo.com?x=5&y=1,2")
+
+    def test_open_docs(self):
+        try:
+            webbrowser.get()  # Will raise if no browser available
+            self.assertTrue(client.series.docs.open())
+        except webbrowser.Error as e:
+            raise unittest.SkipTest(str(e))
 
 
 if __name__ == "__main__":
