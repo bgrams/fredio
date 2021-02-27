@@ -25,6 +25,8 @@ class ApiTree(dict):
     """
 
     def __init__(self, url: str, *endpoints, delimiter: str = "/"):
+        super(ApiTree, self).__init__()
+
         self.delimiter = delimiter
         self.url = url.rstrip(self.delimiter)
         self.is_endpoint = False
@@ -140,7 +142,7 @@ class AsyncClient(object):
 
         raise RuntimeError("Client retries exceeded for url %s" % str_or_url)
 
-    async def get_async(self, jsonpath: str = None, retries: int = 3, **parameters) -> List[Dict]:
+    async def get_async(self, jsonpath: str = None, retries: int = 3, **parameters) -> List[List[Dict]]:
         """
         Get data within an asynchronous request session
 
@@ -207,6 +209,4 @@ class AsyncClient(object):
             subpath += ".html"
         return webbrowser.open_new_tab(FRED_DOC_URL + "/" + subpath)
 
-    @property
-    def docs(self) -> bool:
-        return self.open_documentation
+    docs = open_documentation
