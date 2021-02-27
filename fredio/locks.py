@@ -4,7 +4,7 @@ import math
 import time
 from collections import deque
 
-from .enums import FRED_API_RATE_LIMIT, FRED_API_RATE_RESET
+from .const import FRED_API_RATE_LIMIT, FRED_API_RATE_RESET
 
 
 logger = logging.getLogger(__name__)
