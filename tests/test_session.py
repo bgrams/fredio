@@ -1,7 +1,6 @@
 import os
 import unittest
 import types
-import webbrowser
 
 from pandas import DataFrame
 from fredio import Client

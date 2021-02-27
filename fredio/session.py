@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from copy import deepcopy
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import jsonpath_rw
 import pandas as pd
@@ -16,7 +16,9 @@ from fredio.utils import generate_offsets
 
 class Session(object):
 
-    def __init__(self, api_key: str, **kwargs):
+    def __init__(self, api_key: Optional[str] = None, **kwargs):
+        client.set_defaults(api_key=api_key, file_type=FRED_API_FILE_TYPE)
+
         self._api_key = api_key
         self._client = client
 
@@ -41,17 +43,9 @@ class Session(object):
         """
         Copy
         """
-        new = Session(self._api_key)
-        new._session_cls = self._session_cls
-        new._session_kws = dict(self._session_kws)
+        new = Session(self._api_key, **self._session_kws)
         new._client = deepcopy(self._client)
         return new
-
-    def _get_url(self, **kwargs) -> str:
-        _client = self._client(api_key=self._api_key,
-                               file_type=FRED_API_FILE_TYPE,
-                               **kwargs)
-        return _client.url
 
     @staticmethod
     async def _request(
@@ -105,8 +99,8 @@ class Session(object):
 
         async with self._session_cls(**self._session_kws) as session:
 
-            init_url = self._get_url(**parameters)
-            init_response = await self._request(session, "GET", init_url, retries=retries)
+            tmpclient = self._client(**parameters)
+            init_response = await self._request(session, "GET", tmpclient.url, retries=retries)
 
             results = [init_response]
 
@@ -119,7 +113,7 @@ class Session(object):
             if any((ir_count, ir_limit, ir_offset)):
 
                 coros = [
-                    self._request(session, "GET", self._get_url(offset=offset), retries=retries)
+                    self._request(session, "GET", tmpclient(offset=offset).url, retries=retries)
                     for _, _, offset in generate_offsets(ir_count, ir_limit, ir_offset)
                 ]
 
