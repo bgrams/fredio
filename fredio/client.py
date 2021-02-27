@@ -1,19 +1,21 @@
 import asyncio
 import logging
-from copy import deepcopy
-from typing import Dict, List
+import urllib
+from copy import copy, deepcopy
+from typing import Any, Dict, List
 
 import jsonpath_rw
 import pandas as pd
 from aiohttp import ClientSession
 from aiohttp.typedefs import StrOrURL
+from yarl import URL
 
-from .locks import ratelimiter
-from .utils import generate_offsets, prepare_url
-from .enums import (FRED_API_URL,
-                    FRED_DOC_URL,
-                    FRED_API_FILE_TYPE,
-                    FRED_API_ENDPOINTS)
+from fredio.locks import ratelimiter
+from fredio.utils import generate_offsets
+from fredio.enums import (FRED_API_URL,
+                          FRED_DOC_URL,
+                          FRED_API_FILE_TYPE,
+                          FRED_API_ENDPOINTS)
 
 
 logger = logging.getLogger(__name__)
@@ -21,44 +23,78 @@ logger = logging.getLogger(__name__)
 
 class ApiTree(dict):
     """
-    Tree-based kv structure containing a top level API domain and related endpoints
+    Structure containing a top level URL and child endpoints
     """
 
-    def __init__(self, url: str, *endpoints, delimiter: str = "/"):
-        self.delimiter = delimiter
-        self.url = url.rstrip(self.delimiter)
-        self.is_endpoint = False
-        self.add_endpoints(*endpoints)
+    _query: Dict[Any, Any] = dict()
 
-    def __repr__(self):
-        return f'{self.__class__.__name__} <{self}>'
+    def __init__(self, url: StrOrURL):
+        super(ApiTree, self).__init__()
 
-    def add_endpoints(self, *endpoints):
+        self.url = URL(url, encoded=True)
+
+    def __getattribute__(self, item: Any) -> Any:
         """
-        Add an endpoint to the tree
+        Hijack to allow for indexing using dot notation
         """
-        for ep in endpoints:
-            parent, *child = ep.split(self.delimiter, 1)
-            newpath = self.setdefault(parent, ApiTree(self.url + self.delimiter + parent))
-            if len(child):
-                newpath.add_endpoints(child[0])
-            else:
-                newpath.is_endpoint = True
+        try:
+            return super(ApiTree, self).__getattribute__(item)
+        except AttributeError:
+            if item not in self:
+                raise
+            return self[item]
 
-    def get_endpoints(self) -> List[str]:
+    def __repr__(self):  # pragma: no-cover
+        return f'{self.__class__.__name__} <{self.url}>'
+
+    @classmethod
+    def set_defaults(cls, **params) -> None:
         """
-        Get all endpoints from the tree
+        Set default query parameters for all endpoints
         """
-        endpoints = []
-        for node in self.values():
-            if isinstance(node, ApiTree):
-                endpoints.extend(node.get_endpoints())
-        if self.is_endpoint:
-            endpoints.append(self.url)
-        return endpoints
+        cls._query.update(params)
+
+    def query(self, **params) -> "ApiTree":
+        """
+        Update instance query params
+        """
+        obj = copy(self)
+        obj._query = {**self._query, **params}
+        return obj
+
+    def encode(self, safe_chars: str = ",;") -> URL:
+        """
+        Encode URL. Safe chars are not encoded.
+        """
+        query = urllib.parse.urlencode(self._query, safe=safe_chars)
+        return self.url.with_query(query)
 
 
-apitree = ApiTree(FRED_API_URL, *FRED_API_ENDPOINTS)
+def add_endpoints(tree: ApiTree, *endpoints) -> None:
+    """
+    Add an endpoint to the tree
+    """
+    for ep in endpoints:
+        parent, *child = ep.split("/", 1)
+        newpath = tree.setdefault(parent, ApiTree(tree.url / parent))
+        if len(child):
+            add_endpoints(newpath, child[0])
+
+
+def get_endpoints(tree: ApiTree) -> List[str]:
+    """
+    Get all endpoints from the tree
+    """
+    endpoints = []
+    for node in tree.values():
+        if isinstance(node, ApiTree):
+            endpoints.extend(get_endpoints(node))
+    endpoints.append(tree.url)
+    return endpoints
+
+
+apitree = ApiTree(FRED_API_URL)
+add_endpoints(apitree, *FRED_API_ENDPOINTS)
 
 
 class AsyncClient(object):
@@ -95,12 +131,11 @@ class AsyncClient(object):
         return new
 
     def _get_url(self, **kwargs) -> str:
-        return prepare_url(
-            self._apitree.url,
-            api_key=self._api_key,
-            file_type=FRED_API_FILE_TYPE,
-            **kwargs
-        )
+        return str(self._apitree
+                   .query(api_key=self._api_key,
+                          file_type=FRED_API_FILE_TYPE,
+                          **kwargs)
+                   .encode())
 
     @staticmethod
     async def _request(
@@ -140,7 +175,7 @@ class AsyncClient(object):
 
         raise RuntimeError("Client retries exceeded for url %s" % str_or_url)
 
-    async def get_async(self, jsonpath: str = None, retries: int = 3, **parameters) -> List[Dict]:
+    async def get_async(self, jsonpath: str = None, retries: int = 3, **parameters) -> List[List[Dict]]:
         """
         Get data within an asynchronous request session
 
@@ -202,11 +237,9 @@ class AsyncClient(object):
         """
         import webbrowser
 
-        subpath = self._apitree.url.replace(FRED_API_URL, "").replace("/", "_")
+        subpath = str(self._apitree.url).replace(FRED_API_URL, "").replace("/", "_")
         if subpath:
             subpath += ".html"
         return webbrowser.open_new_tab(FRED_DOC_URL + "/" + subpath)
 
-    @property
-    def docs(self) -> bool:
-        return self.open_documentation
+    docs = open_documentation

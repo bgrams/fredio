@@ -1,6 +1,5 @@
 import logging
 import re
-import urllib
 
 
 class KeyMaskFormatter(logging.Formatter):
@@ -25,13 +24,3 @@ def generate_offsets(count: int, limit: int, offset: int):
     while offset + limit < count:
         offset += limit
         yield count, limit, offset
-
-
-def prepare_url(url: str, safe_chars: str = ",;", **parameters):
-    """
-    Encode a url with parameters
-    """
-
-    if parameters is not None:
-        return url + "?" + urllib.parse.urlencode(parameters, safe=safe_chars)
-    return url
