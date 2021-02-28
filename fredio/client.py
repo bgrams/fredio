@@ -130,5 +130,5 @@ def get_endpoints(tree: ApiClient) -> List[str]:
     return endpoints
 
 
-client = ApiClient(FRED_API_URL)
-add_endpoints(client, *FRED_API_ENDPOINTS)
+Client = ApiClient(FRED_API_URL)
+add_endpoints(Client, *FRED_API_ENDPOINTS)

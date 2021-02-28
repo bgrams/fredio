@@ -1,25 +1,22 @@
 import asyncio
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 import jsonpath_rw
 from aiohttp import ClientSession
 from aiohttp.typedefs import StrOrURL
 from yarl import URL
 
-from fredio.client import client, logger
-from fredio.const import FRED_API_FILE_TYPE
 from fredio.locks import ratelimiter
 from fredio.utils import generate_offsets
 
 
+logger = logging.getLogger(__name__)
+
+
 class Session(object):
 
-    def __init__(self, api_key: Optional[str] = None, **kwargs):
-        client.set_defaults(api_key=api_key, file_type=FRED_API_FILE_TYPE)
-
-        self._api_key = api_key
-        self._client = client
+    def __init__(self, **kwargs):
 
         self._session_cls = ClientSession
         self._session_kws = kwargs

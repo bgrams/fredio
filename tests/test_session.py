@@ -1,9 +1,8 @@
 import asyncio
-import os
 import unittest
 import types
 
-from fredio.client import client
+from fredio.client import Client
 from fredio.session import Session
 
 
@@ -13,10 +12,10 @@ class TestApiClient(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.invalid_series_url = client.series(series_id="NOT_VALID").url
-        cls.valid_series_url = client.series(series_id="EFFR").url
-        cls.valid_releases_url = client.releases.url
-        cls.session = Session(api_key=os.environ["FRED_API_KEY"])
+        cls.invalid_series_url = Client.series(series_id="NOT_VALID").url
+        cls.valid_series_url = Client.series(series_id="EFFR").url
+        cls.valid_releases_url = Client.releases.url
+        cls.session = Session()
 
     def test_get_async(self):
         response = self.session.get(self.valid_series_url)
