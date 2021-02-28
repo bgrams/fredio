@@ -1,43 +1,42 @@
+import asyncio
 import os
 import unittest
 import types
 
-from pandas import DataFrame
-from fredio import Client
+from fredio.client import client
+from fredio.session import Session
 
 
-class TestAsyncClient(unittest.TestCase):
+class TestApiClient(unittest.TestCase):
 
-    client = None
+    client_session = None
 
     @classmethod
     def setUpClass(cls):
-        cls.client = Client(api_key=os.environ["FRED_API_KEY"])
+        cls.invalid_series_url = client.series(series_id="NOT_VALID").url
+        cls.valid_series_url = client.series(series_id="EFFR").url
+        cls.valid_releases_url = client.releases.url
+        cls.session = Session(api_key=os.environ["FRED_API_KEY"])
 
     def test_get_async(self):
-        response = self.client.series.get_async(series_id="EFFR")
+        response = self.session.get(self.valid_series_url)
         self.assertIsInstance(response, types.CoroutineType)
         response.close()
-
-    def test_get_json(self):
-        response = self.client.series.get(series_id="EFFR")
-        self.assertIsInstance(response, list)
-        self.assertIsInstance(response[0], dict)
-
-    def test_get_pandas(self):
-        response = self.client.series.get_pandas(series_id="EFFR")
-        self.assertIsInstance(response, DataFrame)
 
     def test_get_json_with_coro_planning(self):
         # Example from official docs - https://fred.stlouisfed.org/docs/api/fred/releases.html
         # This should pretty consistently only require ~2 requests with limit=200
-        response = self.client.releases.get(limit=200)
-        self.assertIsInstance(response, list)
-        self.assertIsInstance(response[0], dict)
+        loop = asyncio.get_event_loop()
+        req = self.session.get(self.valid_releases_url, limit=200)
+        res = loop.run_until_complete(req)
+        self.assertIsInstance(res, list)
+        self.assertIsInstance(res[0], dict)
 
     def test_runtime_error_on_bad_request(self):
+        loop = asyncio.get_event_loop()
         with self.assertRaises(RuntimeError):
-            self.client.series.get(series_id="NOT_VALID", retries=0)
+            req = self.session.get(self.invalid_series_url, retries=0)
+            loop.run_until_complete(req)
 
 
 if __name__ == "__main__":

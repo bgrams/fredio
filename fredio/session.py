@@ -1,12 +1,11 @@
 import asyncio
 import logging
-from copy import deepcopy
 from typing import List, Dict, Optional
 
 import jsonpath_rw
-import pandas as pd
 from aiohttp import ClientSession
 from aiohttp.typedefs import StrOrURL
+from yarl import URL
 
 from fredio.client import client, logger
 from fredio.const import FRED_API_FILE_TYPE
@@ -25,82 +24,21 @@ class Session(object):
         self._session_cls = ClientSession
         self._session_kws = kwargs
 
-    def __getattribute__(self, name: str):
-        """
-        Hijack to allow for dot notation to access API endpoints
-        """
-        try:
-            return super(Session, self).__getattribute__(name)
-        except AttributeError:
-            if name not in self._client.keys():
-                raise
-
-            new = self._copy()
-            new._client = new._client[name]
-            return new
-
-    def _copy(self):
-        """
-        Copy
-        """
-        new = Session(self._api_key, **self._session_kws)
-        new._client = deepcopy(self._client)
-        return new
-
-    @staticmethod
-    async def _request(
-                session: ClientSession,
-                method: str,
-                str_or_url: StrOrURL,
-                retries: int = 0,
-                **kwargs) -> dict:
-        """
-        Wraps ClientSession.request() with rate limiting and handles retry logic
-
-        :param session: Open client session
-        :param method: Request method
-        :param str_or_url: URL
-        :param retries: Maximum number of request retries
-        :param kwargs: Request parameters
-        """
-
-        ratelimiter.start()
-        async with ratelimiter:
-
-            attempts = 0
-            while attempts <= retries:
-                async with session.request(method, str_or_url, **kwargs) as response:
-                    try:
-                        response.raise_for_status()
-                        return await response.json()
-                    except Exception as e:
-                        logging.error(e)
-                        attempts += 1
-
-                    # TODO: pluggable handling
-                    if response.status == 429:
-                        backoff = ratelimiter.get_backoff()
-                        logger.debug("Retrying request in %d seconds", backoff)
-                        await asyncio.sleep(backoff)
-
-        raise RuntimeError("Client retries exceeded for url %s" % str_or_url)
-
-    async def get_async(self, jsonpath: str = None, retries: int = 3, **parameters) -> List[List[Dict]]:
+    async def get(self, url: StrOrURL, jsonpath: str = None, retries: int = 3, **parameters) -> List[List[Dict]]:
         """
         Get data within an asynchronous request session
 
         Will await a single request to get the first batch of data before executing subsequent
         requests (if required) according to offset logic. Jsonpath query is optionally executed
         on json from each request
-
-        :param jsonpath: jsonpath
-        :param parameters: HTTP request parameters
         """
 
         async with self._session_cls(**self._session_kws) as session:
 
-            tmpclient = self._client(**parameters)
-            init_response = await self._request(session, "GET", tmpclient.url, retries=retries)
+            newurl = URL(url)
+            if parameters:
+                newurl = newurl.update_query(**parameters)
+            init_response = await request(session, "GET", newurl, retries=retries)
 
             results = [init_response]
 
@@ -113,7 +51,7 @@ class Session(object):
             if any((ir_count, ir_limit, ir_offset)):
 
                 coros = [
-                    self._request(session, "GET", tmpclient(offset=offset).url, retries=retries)
+                    request(session, "GET", url.update_query(offset=offset), retries=retries)
                     for _, _, offset in generate_offsets(ir_count, ir_limit, ir_offset)
                 ]
 
@@ -125,15 +63,39 @@ class Session(object):
             return list(map(lambda x: [i.value for i in jparsed.find(x)], results))
         return results
 
-    def get(self, **kwargs) -> List[Dict]:
-        """
-        Get request results as a list. This method is blocking.
-        """
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self.get_async(**kwargs))
 
-    def get_pandas(self, **kwargs) -> pd.DataFrame:
-        """
-        Get request results as a DataFrame. This method is blocking.
-        """
-        return pd.concat(map(pd.DataFrame, self.get(**kwargs)))
+async def request(session: ClientSession,
+                  method: str,
+                  str_or_url: StrOrURL,
+                  retries: int = 0,
+                  **kwargs) -> dict:
+    """
+    Wraps ClientSession.request() with rate limiting and handles retry logic
+
+    :param session: Open client session
+    :param method: Request method
+    :param str_or_url: URL
+    :param retries: Maximum number of request retries
+    :param kwargs: Request parameters
+    """
+
+    ratelimiter.start()
+    async with ratelimiter:
+
+        attempts = 0
+        while attempts <= retries:
+            async with session.request(method, str_or_url, **kwargs) as response:
+                try:
+                    response.raise_for_status()
+                    return await response.json()
+                except Exception as e:
+                    logging.error(e)
+                    attempts += 1
+
+                # TODO: pluggable handling
+                if response.status == 429:
+                    backoff = ratelimiter.get_backoff()
+                    logger.debug("Retrying request in %d seconds", backoff)
+                    await asyncio.sleep(backoff)
+
+    raise RuntimeError("Client retries exceeded for url %s" % str_or_url)

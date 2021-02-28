@@ -1,12 +1,13 @@
+import os
 import unittest
 import webbrowser
+from pandas import DataFrame
 from yarl import URL
 from fredio.client import ApiClient, client, add_endpoints, get_endpoints
+from fredio.session import Session
 
 
 class TestApiClient(unittest.TestCase):
-
-    client = None
 
     def setUp(self):
         self.client = ApiClient("foo.com")
@@ -34,6 +35,22 @@ class TestApiClient(unittest.TestCase):
             self.assertTrue(client.series.docs.open())
         except webbrowser.Error as e:
             raise unittest.SkipTest(str(e))
+
+
+class TestClientRequests(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.session = Session(api_key=os.environ["FRED_API_KEY"])
+
+    def test_get_json(self):
+        response = client.series.get(session=self.session, series_id="EFFR")
+        self.assertIsInstance(response, list)
+        self.assertIsInstance(response[0], dict)
+
+    def test_get_pandas(self):
+        response = client.series.get_pandas(session=self.session, series_id="EFFR")
+        self.assertIsInstance(response, DataFrame)
 
 
 if __name__ == "__main__":

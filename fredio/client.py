@@ -1,9 +1,11 @@
+import asyncio
 import logging
 import urllib
 from copy import copy
 from typing import Any, Dict, List
 
 from aiohttp.typedefs import StrOrURL
+from pandas import DataFrame, concat
 from yarl import URL
 
 from fredio.const import FRED_API_URL, FRED_DOC_URL, FRED_API_ENDPOINTS
@@ -66,6 +68,19 @@ class ApiClient(dict):
         # safe_chars is hard-coded as these chars are used for tag requests etc
         query = urllib.parse.urlencode(self._query, safe=",;")
         return self._url.with_query(query)
+
+    def get(self, session, **kwargs) -> List[Dict]:
+        """
+        Get request results as a list. This method is blocking.
+        """
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(session.get(self.url, **kwargs))
+
+    def get_pandas(self, **kwargs) -> DataFrame:
+        """
+        Get request results as a DataFrame. This method is blocking.
+        """
+        return concat(map(DataFrame, self.get(**kwargs)))
 
 
 class _ApiDocs:
