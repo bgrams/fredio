@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import urllib
 from copy import copy
@@ -10,22 +9,25 @@ from yarl import URL
 
 from fredio.const import FRED_API_URL, FRED_DOC_URL, FRED_API_ENDPOINTS
 from fredio.session import Session
+from fredio import utils
 
 
 logger = logging.getLogger(__name__)
 
 
-class ApiClient(dict):
+class ApiClient(object):
     """
     Structure containing a top level URL and child endpoints
     """
 
+    _children: Dict[str, "ApiClient"]  # TODO: get rid of mutability
     _query: Dict[Any, Any] = dict()
     _session: Session = None
 
     def __init__(self, url: StrOrURL):
         super(ApiClient, self).__init__()
 
+        self._children = dict()
         self._url = URL(url, encoded=True)
 
     def __call__(self, **params) -> "ApiClient":
@@ -43,9 +45,10 @@ class ApiClient(dict):
         try:
             return super(ApiClient, self).__getattribute__(item)
         except AttributeError:
-            if item not in self:
+            children = super(ApiClient, self).__getattribute__("_children")
+            if item not in children.keys():
                 raise
-            return self[item]
+            return children[item]
 
     def __repr__(self):  # pragma: no-cover
         return f'{self.__class__.__name__}<{self.url}>'
@@ -62,6 +65,10 @@ class ApiClient(dict):
     def set_session(cls, session):
         cls._session = session
         return cls
+
+    @property
+    def children(self):
+        return self._children
 
     @property
     def docs(self):
@@ -81,8 +88,8 @@ class ApiClient(dict):
         """
         Get request results as a list. This method is blocking.
         """
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self._session.get(self.url, **kwargs))
+        coro = self._session.get(self.url, **kwargs)
+        return utils.loop.run_until_complete(coro)
 
     def get_pandas(self, **kwargs) -> DataFrame:
         """
@@ -116,26 +123,26 @@ class _ApiDocs:
         return self.webbrowser.open_new_tab(str(self.make_url()))
 
 
-def add_endpoints(tree: ApiClient, *endpoints) -> None:
+def add_endpoints(client: ApiClient, *endpoints) -> None:
     """
     Add an endpoint to the tree
     """
     for ep in endpoints:
         parent, *child = ep.split("/", 1)
-        newpath = tree.setdefault(parent, ApiClient(tree.url / parent))
+        newpath = client.children.setdefault(parent, ApiClient(client.url / parent))
         if len(child):
             add_endpoints(newpath, child[0])
 
 
-def get_endpoints(tree: ApiClient) -> List[str]:
+def get_endpoints(client: ApiClient) -> List[str]:
     """
     Get all endpoints from the tree
     """
     endpoints = []
-    for node in tree.values():
+    for node in client.children.values():
         if isinstance(node, ApiClient):
             endpoints.extend(get_endpoints(node))
-    endpoints.append(tree.url)
+    endpoints.append(client.url)
     return endpoints
 
 

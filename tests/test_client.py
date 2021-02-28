@@ -4,8 +4,10 @@ import unittest
 import webbrowser
 from pandas import DataFrame
 from yarl import URL
+
 from fredio.client import ApiClient, Client, add_endpoints, get_endpoints
 from fredio.session import Session
+from fredio import utils
 
 
 class TestApiClient(unittest.TestCase):
@@ -15,9 +17,9 @@ class TestApiClient(unittest.TestCase):
         add_endpoints(self.client, "fuzz", "bar/baz")
 
     def test_add_endpoint(self):
-        self.assertIn("bar", self.client)
-        self.assertIsInstance(self.client["bar"], ApiClient)
-        self.assertIn("baz", self.client["bar"])
+        self.assertIn("bar", self.client.children.keys())
+        self.assertIsInstance(self.client.children["bar"], ApiClient)
+        self.assertIn("baz", self.client.children["bar"].children.keys())
 
     def test_get_endpoint(self):
         endpoints = get_endpoints(self.client)
@@ -41,17 +43,23 @@ class TestApiClient(unittest.TestCase):
 class TestClientRequests(unittest.TestCase):
 
     client: ApiClient
+    loop: asyncio.BaseEventLoop
 
     @classmethod
     def setUpClass(cls):
         cls.client = Client()
         cls.client.set_session(Session())
         cls.client.set_defaults(api_key=os.environ["FRED_API_KEY"], file_type="json")
+        cls.loop = utils.loop
 
     @classmethod
     def tearDownClass(cls):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(cls.client._session.close())
+        print("Cancelling all tasks")
+        tasks = utils.get_all_tasks()
+        for task in tasks:
+            task.cancel()
+
+        cls.loop.run_until_complete(cls.client._session.close())
 
     def test_get_json(self):
         response = self.client.series.get(series_id="EFFR")

@@ -4,6 +4,7 @@ import types
 
 from fredio.client import Client
 from fredio.session import Session
+from fredio import utils
 
 
 class TestApiClient(unittest.TestCase):
@@ -19,8 +20,12 @@ class TestApiClient(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(cls.session.close())
+        print("Cancelling all tasks")
+        tasks = utils.get_all_tasks()
+        for task in tasks:
+            task.cancel()
+
+        utils.loop.run_until_complete(cls.session.close())
 
     def test_get_async(self):
         response = self.session.get(self.valid_series_url)

@@ -1,31 +1,35 @@
 import asyncio
-import sys
 import unittest
 
 from fredio.locks import RateLimiter
-
-if sys.version_info < (3, 7, 0):
-    get_async_tasks = asyncio.Task.all_tasks
-else:
-    get_async_tasks = asyncio.all_tasks
+from fredio import utils
 
 
 class TestDefaultRateLimiting(unittest.TestCase):
 
     period = 0.25
     rate = 2
-    timer = "system"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.loop = utils.loop
+
+    @classmethod
+    def tearDownClass(cls):
+        print("Cancelling all tasks")
+        tasks = utils.get_all_tasks()
+        for task in tasks:
+            task.cancel()
 
     def setUp(self):
-        self.loop = asyncio.get_event_loop()
-        self.ratelimiter = RateLimiter(self.rate, self.period, self.timer)
+        self.ratelimiter = RateLimiter(self.rate, self.period)
         self.ratelimiter.start()
 
     def test_replenishment_task_exists(self):
         # No other tasks should be running at this point, however in 3.8
         # we can use named tasks to assert that this particular one exists
         # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
-        self.assertGreaterEqual(len(get_async_tasks(loop=self.loop)), 1)
+        self.assertGreaterEqual(len(utils.get_all_tasks()), 1)
 
     # Since the rate limiting refresh period has been set to 1, we know that the following
     # tests will result in (approximately) 1 and int(timestamp)
@@ -52,15 +56,7 @@ class TestDefaultRateLimiting(unittest.TestCase):
         self.loop.run_until_complete(acquire_release())
 
 
-# We expect the exact same functional behavior as with the default timer.
-class TestMonotonicRateLimiting(TestDefaultRateLimiting):
-    timer = "monotonic"
-
-
 class TetRatelimiterExceptions(unittest.TestCase):
-    def test_value_error_invalid_clock(self):
-        with self.assertRaises(ValueError):
-            RateLimiter(timer="invalid")
 
     def test_runtime_error_acquire_not_started(self):
         with self.assertRaises(RuntimeError):

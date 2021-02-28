@@ -7,6 +7,7 @@ from aiohttp import ClientSession
 from aiohttp.helpers import reify  # TODO: use something else to avoid class cache
 from yarl import URL
 
+from fredio import events
 from fredio.locks import ratelimiter
 from fredio.utils import generate_offsets
 
@@ -55,7 +56,13 @@ class Session(object):
                 async with self.session.request(method, url, **kwargs) as response:
                     try:
                         response.raise_for_status()
-                        return await response.json()
+                        data = await response.json()
+
+                        # Emit an event with name corresponding to the final endpoint
+                        if events.running():
+                            name = response.url.path.split("/")[-1]
+                            await events.produce(name, data)  # TODO: is this thread safe?
+                        return data
                     except Exception as e:
                         logging.error(e)
                         attempts += 1
