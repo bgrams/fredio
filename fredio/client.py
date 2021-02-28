@@ -66,6 +66,10 @@ class ApiClient(object):
         cls._session = session
         return cls
 
+    @classmethod
+    def close_session(cls):
+        return utils.loop.run_until_complete(cls._session.close())
+
     @property
     def children(self):
         return self._children

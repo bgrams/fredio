@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from fredio.locks import RateLimiter
+from fredio import locks
 from fredio import utils
 
 
@@ -14,16 +14,12 @@ class TestDefaultRateLimiting(unittest.TestCase):
     def setUpClass(cls):
         cls.loop = utils.loop
 
-    @classmethod
-    def tearDownClass(cls):
-        print("Cancelling all tasks")
-        tasks = utils.get_all_tasks()
-        for task in tasks:
-            task.cancel()
-
     def setUp(self):
-        self.ratelimiter = RateLimiter(self.rate, self.period)
+        self.ratelimiter = locks.RateLimiter(self.rate, self.period)
         self.ratelimiter.start()
+
+    def tearDown(self):
+        self.ratelimiter.stop()
 
     def test_replenishment_task_exists(self):
         # No other tasks should be running at this point, however in 3.8
@@ -55,13 +51,19 @@ class TestDefaultRateLimiting(unittest.TestCase):
 
         self.loop.run_until_complete(acquire_release())
 
+    def test_ratelimiter_get_set(self):
+        rl1 = locks.get_rate_limiter()
+        locks.set_rate_limit(100)
+        rl2 = locks.get_rate_limiter()
+        self.assertIsNot(rl1, rl2)
+
 
 class TetRatelimiterExceptions(unittest.TestCase):
 
     def test_runtime_error_acquire_not_started(self):
         with self.assertRaises(RuntimeError):
             loop = asyncio.get_event_loop()
-            loop.run_until_complete(RateLimiter(1, 1).acquire())
+            loop.run_until_complete(locks.RateLimiter(1, 1).acquire())
 
 
 if __name__ == "__main__":

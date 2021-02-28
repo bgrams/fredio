@@ -8,7 +8,7 @@ from aiohttp.helpers import reify  # TODO: use something else to avoid class cac
 from yarl import URL
 
 from fredio import events
-from fredio.locks import ratelimiter
+from fredio import locks
 from fredio.utils import generate_offsets
 
 
@@ -47,8 +47,9 @@ class Session(object):
         :param retries: Maximum number of request retries
         :param kwargs: Request parameters
         """
-
+        ratelimiter = locks.get_rate_limiter()
         ratelimiter.start()
+
         async with ratelimiter:
 
             attempts = 0

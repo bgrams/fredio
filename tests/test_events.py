@@ -43,9 +43,12 @@ class TestEvents(unittest.TestCase):
             for handler in handlers:
                 self.assertTrue(inspect.iscoroutinefunction(handler))
 
-    def assertNumTasks(self, num: int):
+    def assertNumRunningTasks(self, num: int):
+
+        # Py36 doesn't seem to clean up cancelled tasks, so only filter for running
         tasks = utils.get_all_tasks()
-        self.assertEqual(len(tasks), num)
+        running = list(filter(lambda x: not x.done(), tasks))
+        self.assertEqual(len(running), num)
 
     def test_event_add(self):
         self.event.add(lambda x: x)
@@ -95,7 +98,7 @@ class TestEvents(unittest.TestCase):
         self.assertFalse(events.running())
         self.assertTrue(events.listen())
         self.assertTrue(events.running())
-        self.assertNumTasks(1)
+        self.assertNumRunningTasks(1)
 
 
 if __name__ == "_main__":

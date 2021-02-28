@@ -40,36 +40,5 @@ class TestApiClient(unittest.TestCase):
             raise unittest.SkipTest(str(e))
 
 
-class TestClientRequests(unittest.TestCase):
-
-    client: ApiClient
-    loop: asyncio.BaseEventLoop
-
-    @classmethod
-    def setUpClass(cls):
-        cls.client = Client()
-        cls.client.set_session(Session())
-        cls.client.set_defaults(api_key=os.environ["FRED_API_KEY"], file_type="json")
-        cls.loop = utils.loop
-
-    @classmethod
-    def tearDownClass(cls):
-        print("Cancelling all tasks")
-        tasks = utils.get_all_tasks()
-        for task in tasks:
-            task.cancel()
-
-        cls.loop.run_until_complete(cls.client._session.close())
-
-    def test_get_json(self):
-        response = self.client.series.get(series_id="EFFR")
-        self.assertIsInstance(response, list)
-        self.assertIsInstance(response[0], dict)
-
-    def test_get_pandas(self):
-        response = self.client.series.get_pandas(series_id="EFFR")
-        self.assertIsInstance(response, DataFrame)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -1,10 +1,12 @@
+__all__ = ["get_rate_limiter", "set_rate_limit"]
+
 import asyncio
 import logging
 import math
 import time
 from collections import deque
 
-from .const import FRED_API_RATE_LIMIT, FRED_API_RATE_RESET
+from . import const
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -21,8 +23,8 @@ class RateLimiter(asyncio.BoundedSemaphore):
     _loop: asyncio.BaseEventLoop
 
     def __init__(self,
-                 value: int = FRED_API_RATE_LIMIT,
-                 period: int = FRED_API_RATE_RESET,
+                 value: int = const.FRED_API_RATE_LIMIT,
+                 period: int = const.FRED_API_RATE_RESET,
                  *,
                  loop: asyncio.BaseEventLoop = utils.loop):
 
@@ -30,9 +32,13 @@ class RateLimiter(asyncio.BoundedSemaphore):
 
         self._period = period
         self._releases = deque()
-        self._started = False
+        self._task = None
 
         self._timer = time.time
+
+    @property
+    def started(self):
+        return self._task is not None
 
     def get_backoff(self) -> int:
         """
@@ -50,16 +56,20 @@ class RateLimiter(asyncio.BoundedSemaphore):
         """
         Create background replenishment task. Can be called idempotently.
         """
-        if not self._started:
-            self._loop.create_task(self.replenish())
-            self._started = True
+        if not self.started:
+            self._task = self._loop.create_task(self.replenish())
+        return True
+
+    def stop(self):
+        if self.started:
+            self._task.cancel()
         return True
 
     async def acquire(self) -> bool:
         """
         Acquire a lock
         """
-        if not self._started:
+        if not self.started:
             raise RuntimeError("Rate limiter must be started via start()")
         return await super(RateLimiter, self).acquire()
 
@@ -102,4 +112,29 @@ class RateLimiter(asyncio.BoundedSemaphore):
         self._releases.append((self._timer(), self.get_counter()))
 
 
-ratelimiter = RateLimiter()
+_ratelimiter = RateLimiter()
+
+
+def get_rate_limiter():
+    """
+    Get the global ratelimiter
+    """
+    return _ratelimiter
+
+
+def set_rate_limit(limit: int):
+    """
+    Reset the global ratelimiter with a new limit.
+
+    Not threadsafe
+    """
+    if limit > const.FRED_API_RATE_LIMIT:
+        raise ValueError("Limit must be <= %d" % const.FRED_API_RATE_LIMIT)
+
+    global _ratelimiter
+
+    _ratelimiter.stop()
+    _ratelimiter = RateLimiter(limit)
+    _ratelimiter.start()
+
+    return True
