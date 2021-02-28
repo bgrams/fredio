@@ -9,6 +9,7 @@ from pandas import DataFrame, concat
 from yarl import URL
 
 from fredio.const import FRED_API_URL, FRED_DOC_URL, FRED_API_ENDPOINTS
+from fredio.session import Session
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ class ApiClient(dict):
     """
 
     _query: Dict[Any, Any] = dict()
+    _session: Session = None
 
     def __init__(self, url: StrOrURL):
         super(ApiClient, self).__init__()
@@ -49,11 +51,17 @@ class ApiClient(dict):
         return f'{self.__class__.__name__}<{self.url}>'
 
     @classmethod
-    def set_defaults(cls, **params) -> None:
+    def set_defaults(cls, **params):
         """
         Set default query parameters for all endpoints
         """
         cls._query.update(params)
+        return cls
+
+    @classmethod
+    def set_session(cls, session):
+        cls._session = session
+        return cls
 
     @property
     def docs(self):
@@ -69,12 +77,12 @@ class ApiClient(dict):
         query = urllib.parse.urlencode(self._query, safe=",;")
         return self._url.with_query(query)
 
-    def get(self, session, **kwargs) -> List[Dict]:
+    def get(self, **kwargs) -> List[Dict]:
         """
         Get request results as a list. This method is blocking.
         """
         loop = asyncio.get_event_loop()
-        return loop.run_until_complete(session.get(self.url, **kwargs))
+        return loop.run_until_complete(self._session.get(self.url, **kwargs))
 
     def get_pandas(self, **kwargs) -> DataFrame:
         """
@@ -84,27 +92,28 @@ class ApiClient(dict):
 
 
 class _ApiDocs:
+    import webbrowser
+
     def __init__(self, url):
         self.url = url
 
-    def open(self):
-        """
-        Open official endpoint documentation in the browser
-
-        Endpoint mapping logic:
-        /fred/series/observations -> /fred/series_observations.html
-        """
-
-        import webbrowser
-
+    def make_url(self):
         subpath = (self.url.path
                    .replace("/fred", "")
                    .lstrip("/")
                    .replace("/", "_"))
         if subpath:
             subpath += ".html"
-        docurl = URL(FRED_DOC_URL) / subpath
-        return webbrowser.open_new_tab(str(docurl))
+        return URL(FRED_DOC_URL) / subpath
+
+    def open(self):
+        return self.webbrowser.open(str(self.make_url()))
+
+    def open_new(self):
+        return self.webbrowser.open_new(str(self.make_url()))
+
+    def open_new_tab(self):
+        return self.webbrowser.open_new_tab(str(self.make_url()))
 
 
 def add_endpoints(tree: ApiClient, *endpoints) -> None:

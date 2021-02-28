@@ -1,3 +1,4 @@
+import asyncio
 import os
 import unittest
 import webbrowser
@@ -39,18 +40,26 @@ class TestApiClient(unittest.TestCase):
 
 class TestClientRequests(unittest.TestCase):
 
+    client: ApiClient
+
     @classmethod
     def setUpClass(cls):
-        Client.set_defaults(api_key=os.environ["FRED_API_KEY"], file_type="json")
-        cls.session = Session()
+        cls.client = Client()
+        cls.client.set_session(Session())
+        cls.client.set_defaults(api_key=os.environ["FRED_API_KEY"], file_type="json")
+
+    @classmethod
+    def tearDownClass(cls):
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(cls.client._session.close())
 
     def test_get_json(self):
-        response = Client.series.get(session=self.session, series_id="EFFR")
+        response = self.client.series.get(series_id="EFFR")
         self.assertIsInstance(response, list)
         self.assertIsInstance(response[0], dict)
 
     def test_get_pandas(self):
-        response = Client.series.get_pandas(session=self.session, series_id="EFFR")
+        response = self.client.series.get_pandas(series_id="EFFR")
         self.assertIsInstance(response, DataFrame)
 
 

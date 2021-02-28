@@ -8,7 +8,7 @@ from fredio.session import Session
 
 class TestApiClient(unittest.TestCase):
 
-    client_session = None
+    session: Session
 
     @classmethod
     def setUpClass(cls):
@@ -16,6 +16,11 @@ class TestApiClient(unittest.TestCase):
         cls.valid_series_url = Client.series(series_id="EFFR").url
         cls.valid_releases_url = Client.releases.url
         cls.session = Session()
+
+    @classmethod
+    def tearDownClass(cls):
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(cls.session.close())
 
     def test_get_async(self):
         response = self.session.get(self.valid_series_url)
