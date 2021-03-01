@@ -57,8 +57,9 @@ def configure(api_key: Optional[str] = None,
 
 def shutdown():
     for task in utils.get_all_tasks():
-        logger.info("Cancelling task %s" % task)
-        task.cancel()
+        if not task.done():
+            logger.info("Cancelling task %s" % task)
+            task.cancel()
 
     if _client is not None:
         logger.info("Closing client session")
