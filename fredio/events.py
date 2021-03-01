@@ -39,7 +39,7 @@ class Event(object):
 
         for handler in self.handlers:
             try:
-                await handler(*args, **kwargs)
+                await utils.loop.create_task(handler(*args, **kwargs))
             except Exception as e:
                 logger.error(e)
 
@@ -96,14 +96,14 @@ def coro(fn: Callable):
     """
     Ensures a function is awaitable
     """
+    if inspect.iscoroutinefunction(fn):
+        return fn
 
     @wraps(fn)
     async def coro_wrap(*args, **kwargs):
         await asyncio.sleep(0)
         return fn(*args, **kwargs)
 
-    if inspect.iscoroutinefunction(fn):
-        return fn
     return coro_wrap
 
 

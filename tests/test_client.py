@@ -1,5 +1,4 @@
 import unittest
-import webbrowser
 from yarl import URL
 
 from fredio.client import ApiClient, add_endpoints, get_endpoints
@@ -24,8 +23,8 @@ class TestApiClient(unittest.TestCase):
 
     def test_url_encode(self):
         # Special chars should be protected from encoding
-        url = self.client(x=5, y="1,2").url
-        self.assertEqual(str(url), "foo.com?x=5&y=1,2")
+        self.client.set_defaults(x=5, y="1,2")
+        self.assertEqual(str(self.client.url), "foo.com?x=5&y=1,2")
 
 
 if __name__ == "__main__":

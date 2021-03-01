@@ -20,8 +20,8 @@ class TestApiClient(unittest.TestCase):
         cls.client = configure()
         cls.session = cls.client._session
 
-        cls.invalid_series_url = cls.client.series(series_id="NOT_VALID").url
-        cls.valid_series_url = cls.client.series(series_id="EFFR").url
+        cls.invalid_series_url = cls.client.series.url.with_query(series_id="NOT_VALID")
+        cls.valid_series_url = cls.client.series.url.with_query(series_id="EFFR")
         cls.valid_releases_url = cls.client.releases.url
 
     @classmethod

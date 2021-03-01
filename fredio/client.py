@@ -23,7 +23,7 @@ class ApiClient(object):
     """
 
     _children: Dict[str, "ApiClient"]  # TODO: get rid of mutability
-    _query: Dict[Any, Any] = dict()
+    _defaults: Dict[Any, Any] = dict()
     _session: Session = None
 
     def __init__(self, url: StrOrURL):
@@ -31,14 +31,6 @@ class ApiClient(object):
 
         self._children = dict()
         self._url = URL(url, encoded=True)
-
-    def __call__(self, **params) -> "ApiClient":
-        """
-        Return a new client object with updated query params
-        """
-        obj = copy(self)
-        obj._query = {**self._query, **params}
-        return obj
 
     def __getattribute__(self, item: Any) -> Any:
         """
@@ -55,12 +47,20 @@ class ApiClient(object):
     def __repr__(self):  # pragma: no-cover
         return f'{self.__class__.__name__}<{self._url}>'
 
+    def _encode_url(self):
+        """
+        Create new URL with default query parameters
+        """
+        # safe_chars is hard-coded as these chars are used for tag requests etc
+        query = urllib.parse.urlencode(self._defaults, safe=",;")
+        return self._url.with_query(query)
+
     @classmethod
     def set_defaults(cls, **params):
         """
         Set default query parameters for all endpoints
         """
-        cls._query.update(params)
+        cls._defaults = params
         return cls
 
     @classmethod
@@ -85,17 +85,21 @@ class ApiClient(object):
         """
         Combine URL and query
         """
+        return self._encode_url()
 
-        # safe_chars is hard-coded as these chars are used for tag requests etc
-        query = urllib.parse.urlencode(self._query, safe=",;")
-        return self._url.with_query(query)
+    async def aget(self, **kwargs):
+        """
+        Run session.get as an async task
+        """
+        coro = self._session.get(self.url, **kwargs)
+        task = utils.loop.create_task(coro)
+        return await task
 
     def get(self, **kwargs) -> List[Dict]:
         """
         Get request results as a list. This method is blocking.
         """
-        coro = self._session.get(self.url, **kwargs)
-        return utils.loop.run_until_complete(coro)
+        return utils.loop.run_until_complete(self.aget(**kwargs))
 
     def get_pandas(self, **kwargs) -> DataFrame:
         """
