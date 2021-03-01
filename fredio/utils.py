@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import sys
-from typing import Set
+from typing import Generator, Set, Tuple
 
 # Main thread event loop
 loop = asyncio.get_event_loop()
@@ -23,7 +23,7 @@ class KeyMaskFormatter(logging.Formatter):
         return self._filter(original)
 
 
-def generate_offsets(count: int, limit: int, offset: int):
+def generate_offsets(count: int, limit: int, offset: int) -> Generator[Tuple[int, int, int], None, None]:
     """
     Generator yielding new offsets
     """

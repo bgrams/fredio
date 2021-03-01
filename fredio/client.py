@@ -1,9 +1,9 @@
 __all__ = ["ApiClient", "add_endpoints", "get_endpoints"]
 
+import asyncio
 import logging
 import urllib
-from copy import copy
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Type
 
 from aiohttp.typedefs import StrOrURL
 from pandas import DataFrame, concat
@@ -47,7 +47,7 @@ class ApiClient(object):
     def __repr__(self):  # pragma: no-cover
         return f'{self.__class__.__name__}<{self._url}>'
 
-    def _encode_url(self):
+    def _encode_url(self) -> URL:
         """
         Create new URL with default query parameters
         """
@@ -56,7 +56,7 @@ class ApiClient(object):
         return self._url.with_query(query)
 
     @classmethod
-    def set_defaults(cls, **params):
+    def set_defaults(cls, **params) -> Type["ApiClient"]:
         """
         Set default query parameters for all endpoints
         """
@@ -64,36 +64,45 @@ class ApiClient(object):
         return cls
 
     @classmethod
-    def set_session(cls, session):
+    def set_session(cls, session) -> Type["ApiClient"]:
+        """
+        Set the ClientSession for this class
+        """
         cls._session = session
         return cls
 
     @classmethod
     def close_session(cls):
+        """
+        Close the client session
+        """
         return utils.loop.run_until_complete(cls._session.close())
 
     @property
-    def children(self):
+    def children(self) -> Dict[str, "ApiClient"]:
+        """
+        Get client children
+        """
         return self._children
 
     @property
-    def docs(self):
+    def docs(self) -> "_ApiDocs":
         return _ApiDocs(self._url)
 
     @property
-    def url(self):
+    def url(self) -> URL:
         """
         Combine URL and query
         """
         return self._encode_url()
 
-    async def aget(self, **kwargs):
+    def aget(self, **kwargs) -> asyncio.Task:
         """
-        Run session.get as an async task
+        Create an awaitable Task
         """
         coro = self._session.get(self.url, **kwargs)
         task = utils.loop.create_task(coro)
-        return await task
+        return task
 
     def get(self, **kwargs) -> List[Dict]:
         """
@@ -114,7 +123,7 @@ class _ApiDocs:
     def __init__(self, url):
         self.url = url
 
-    def make_url(self):
+    def make_url(self) -> URL:
         subpath = (self.url.path
                    .replace("/fred", "")
                    .lstrip("/")
@@ -123,13 +132,13 @@ class _ApiDocs:
             subpath += ".html"
         return URL(FRED_DOC_URL) / subpath
 
-    def open(self):
+    def open(self) -> bool:
         return self.webbrowser.open(str(self.make_url()))
 
-    def open_new(self):
+    def open_new(self) -> bool:
         return self.webbrowser.open_new(str(self.make_url()))
 
-    def open_new_tab(self):
+    def open_new_tab(self) -> bool:
         return self.webbrowser.open_new_tab(str(self.make_url()))
 
 

@@ -7,7 +7,7 @@ import asyncio
 import inspect
 import logging
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from . import utils
 
@@ -24,14 +24,14 @@ class Event(object):
         self.name = name
         self.handlers = []
 
-    def add(self, listener: Callable):
+    def add(self, listener: Callable) -> None:
         """
         Add a listener to this event
         """
         self.handlers.append(coro(listener))
         logger.info("Registered handler '%s' for event '%s'" % (listener.__name__, self.name))
 
-    async def apply(self, *args, **kwargs):
+    async def apply(self, *args, **kwargs) -> None:
         """
         Call all event handlers for this event
         """
@@ -44,14 +44,14 @@ class Event(object):
                 logger.error(e)
 
 
-async def produce(name: str, data: Any, q: asyncio.Queue = queue):
+async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
     """
     Produce an event
     """
     return await q.put((name, data))
 
 
-async def consume(q: asyncio.Queue = queue):
+async def consume(q: asyncio.Queue = queue) -> None:
     """
     Consume an event
     """
@@ -60,12 +60,12 @@ async def consume(q: asyncio.Queue = queue):
         await _events[name].apply(event)
 
 
-async def _listen():
+async def _listen() -> None:
     while True:
         await consume(queue)
 
 
-def listen():
+def listen() -> bool:
     """
     Start a background task to consume events
     """
@@ -79,11 +79,14 @@ def listen():
     return True
 
 
-def running():
+def running() -> bool:
+    """
+    Is the event listener running?
+    """
     return _running
 
 
-def register(name: str, fn: Callable):
+def register(name: str, fn: Callable) -> None:
     """
     Register an event handler to globals
     """
@@ -92,7 +95,7 @@ def register(name: str, fn: Callable):
 
 # --- decorators --- #
 
-def coro(fn: Callable):
+def coro(fn: Callable[..., Any]) -> Callable[..., Awaitable]:
     """
     Ensures a function is awaitable
     """
@@ -107,7 +110,7 @@ def coro(fn: Callable):
     return coro_wrap
 
 
-def on_event(name: str):
+def on_event(name: str) -> Callable:
     """
     Register an event handler to globals
     """

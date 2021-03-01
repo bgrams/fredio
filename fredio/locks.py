@@ -37,7 +37,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
         self._timer = time.time
 
     @property
-    def started(self):
+    def started(self) -> bool:
         return self._task is not None
 
     def get_backoff(self) -> int:
@@ -60,7 +60,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
             self._task = self._loop.create_task(self.replenish())
         return True
 
-    def stop(self):
+    def stop(self) -> bool:
         if self.started:
             self._task.cancel()
         return True
@@ -73,7 +73,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
             raise RuntimeError("Rate limiter must be started via start()")
         return await super(RateLimiter, self).acquire()
 
-    async def replenish(self):
+    async def replenish(self) -> None:
         """
         Run a continuous loop to periodically release all locks from a previous epoch.
 
@@ -105,7 +105,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
                 counter = new_counter
             await asyncio.sleep(0)
 
-    def release(self):
+    def release(self) -> None:
         """
         Delayed override, releases are periodically handled by `replenish()`
         """
@@ -115,14 +115,14 @@ class RateLimiter(asyncio.BoundedSemaphore):
 _ratelimiter = RateLimiter()
 
 
-def get_rate_limiter():
+def get_rate_limiter() -> RateLimiter:
     """
     Get the global ratelimiter
     """
     return _ratelimiter
 
 
-def set_rate_limit(limit: int):
+def set_rate_limit(limit: int) -> bool:
     """
     Reset the global ratelimiter with a new limit.
 

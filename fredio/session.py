@@ -2,7 +2,7 @@ __all__ = ["Session"]
 
 import asyncio
 import logging
-from typing import List, Dict
+from typing import Any, List, Dict
 
 import jsonpath_rw
 from aiohttp import ClientSession
@@ -33,7 +33,7 @@ class Session(object):
                       method: str,
                       url: URL,
                       retries: int = 0,
-                      **kwargs) -> dict:
+                      **kwargs) -> Dict[Any, Any]:
         """
         Wraps ClientSession.request() with rate limiting and handles retry logic
 
@@ -112,8 +112,14 @@ class Session(object):
         return results
 
     @reify
-    def session(self):
+    def session(self) -> ClientSession:
+        """
+        Return a ClientSession instance (cached)
+        """
         return self._session_cls(**self._session_kws)
 
     def close(self):
+        """
+        Close the ClientSession
+        """
         return self.session.close()
