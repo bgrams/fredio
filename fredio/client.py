@@ -1,3 +1,5 @@
+__all__ = ["ApiClient", "add_endpoints", "get_endpoints"]
+
 import logging
 import urllib
 from copy import copy
@@ -7,7 +9,7 @@ from aiohttp.typedefs import StrOrURL
 from pandas import DataFrame, concat
 from yarl import URL
 
-from fredio.const import FRED_API_URL, FRED_DOC_URL, FRED_API_ENDPOINTS
+from fredio.const import FRED_DOC_URL
 from fredio.session import Session
 from fredio import utils
 
@@ -51,7 +53,7 @@ class ApiClient(object):
             return children[item]
 
     def __repr__(self):  # pragma: no-cover
-        return f'{self.__class__.__name__}<{self.url}>'
+        return f'{self.__class__.__name__}<{self._url}>'
 
     @classmethod
     def set_defaults(cls, **params):
@@ -148,7 +150,3 @@ def get_endpoints(client: ApiClient) -> List[str]:
             endpoints.extend(get_endpoints(node))
     endpoints.append(client.url)
     return endpoints
-
-
-Client = ApiClient(FRED_API_URL)
-add_endpoints(Client, *FRED_API_ENDPOINTS)

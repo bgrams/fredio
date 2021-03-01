@@ -1,13 +1,13 @@
 import asyncio
-import os
 import types
 import unittest
+import webbrowser
 
 from pandas import DataFrame
 
-from fredio.client import Client, ApiClient
+from fredio.client import ApiClient
 from fredio.session import Session
-from fredio import utils
+from fredio import configure, shutdown, utils
 
 
 class TestApiClient(unittest.TestCase):
@@ -17,13 +17,8 @@ class TestApiClient(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.client = Client()
-        cls.session = Session()
-
-        cls.client.set_defaults(api_key=os.environ["FRED_API_KEY"],
-                                file_type="json")
-
-        cls.client.set_session(cls.session)
+        cls.client = configure()
+        cls.session = cls.client._session
 
         cls.invalid_series_url = cls.client.series(series_id="NOT_VALID").url
         cls.valid_series_url = cls.client.series(series_id="EFFR").url
@@ -31,12 +26,7 @@ class TestApiClient(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        print("Cancelling all tasks")
-        tasks = utils.get_all_tasks()
-        for task in tasks:
-            task.cancel()
-
-        utils.loop.run_until_complete(cls.session.close())
+        shutdown()
 
     def test_session_get(self):
         response = self.session.get(self.valid_series_url)
@@ -66,6 +56,13 @@ class TestApiClient(unittest.TestCase):
     def test_client_get_pandas(self):
         response = self.client.series.get_pandas(series_id="EFFR")
         self.assertIsInstance(response, DataFrame)
+
+    def test_open_docs(self):
+        try:
+            webbrowser.get()  # Will raise if no browser available
+            self.assertTrue(self.client.series.docs.open())
+        except webbrowser.Error as e:
+            raise unittest.SkipTest(str(e))
 
 
 if __name__ == "__main__":

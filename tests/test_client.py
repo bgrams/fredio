@@ -1,13 +1,8 @@
-import asyncio
-import os
 import unittest
 import webbrowser
-from pandas import DataFrame
 from yarl import URL
 
-from fredio.client import ApiClient, Client, add_endpoints, get_endpoints
-from fredio.session import Session
-from fredio import utils
+from fredio.client import ApiClient, add_endpoints, get_endpoints
 
 
 class TestApiClient(unittest.TestCase):
@@ -31,13 +26,6 @@ class TestApiClient(unittest.TestCase):
         # Special chars should be protected from encoding
         url = self.client(x=5, y="1,2").url
         self.assertEqual(str(url), "foo.com?x=5&y=1,2")
-
-    def test_open_docs(self):
-        try:
-            webbrowser.get()  # Will raise if no browser available
-            self.assertTrue(Client.series.docs.open())
-        except webbrowser.Error as e:
-            raise unittest.SkipTest(str(e))
 
 
 if __name__ == "__main__":

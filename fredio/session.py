@@ -1,3 +1,5 @@
+__all__ = ["Session"]
+
 import asyncio
 import logging
 from typing import List, Dict
