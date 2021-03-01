@@ -29,13 +29,6 @@ class Session(object):
 
         self._cache = dict()  # for property persistence
 
-    async def __aenter__(self):
-        return await self.session.__aenter__()
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-        del self._cache["session"]
-
     async def request(self,
                       method: str,
                       url: URL,
