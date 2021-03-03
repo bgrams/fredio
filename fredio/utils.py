@@ -1,14 +1,18 @@
+__all__ = ["KeyMaskingFormatter", "get_all_tasks"]
+
 import asyncio
 import logging
 import re
 import sys
-from typing import Generator, Set, Tuple
+from typing import Set
 
-# Main thread event loop
+logger = logging.getLogger(__name__)
+
+# Main event loop
 loop = asyncio.get_event_loop()
 
 
-class KeyMaskFormatter(logging.Formatter):
+class KeyMaskingFormatter(logging.Formatter):
     """
     Formatter that removes sensitive information in urls.
     """
@@ -19,17 +23,8 @@ class KeyMaskFormatter(logging.Formatter):
         return self.apikey_re.sub("<masked>", record)
 
     def format(self, record):
-        original = super(KeyMaskFormatter, self).format(record)
+        original = super(KeyMaskingFormatter, self).format(record)
         return self._filter(original)
-
-
-def generate_offsets(count: int, limit: int, offset: int) -> Generator[Tuple[int, int, int], None, None]:
-    """
-    Generator yielding new offsets
-    """
-    while offset + limit < count:
-        offset += limit
-        yield count, limit, offset
 
 
 def get_all_tasks() -> Set[asyncio.Task]:
@@ -40,3 +35,13 @@ def get_all_tasks() -> Set[asyncio.Task]:
         return asyncio.Task.all_tasks(loop=loop)
     else:
         return asyncio.all_tasks(loop=loop)
+
+
+def cancel_running_tasks() -> None:
+    """
+    Cancel all running tasks in this loop
+    """
+    for task in get_all_tasks():
+        if not task.done():
+            logger.info("Cancelling task %s" % task)
+            task.cancel()

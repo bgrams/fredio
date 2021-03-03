@@ -2,19 +2,32 @@ __all__ = ["Session"]
 
 import asyncio
 import logging
-from typing import Any, List, Dict
+from typing import Any, Awaitable, List, Dict, Generator, Optional
 
 import jsonpath_rw
 from aiohttp import ClientSession
 from aiohttp.helpers import reify  # TODO: use something else to avoid class cache
 from yarl import URL
 
-from fredio import events
-from fredio import locks
-from fredio.utils import generate_offsets
+from . import events
+from . import locks
 
 
 logger = logging.getLogger(__name__)
+
+
+def iter_offsets(count: int, limit: int, offset: int) -> Generator[int, None, None]:
+    """
+    Generator yielding new offsets. The offset is incremented by limit until
+    it surpasses count.
+
+    :param count: count
+    :param limit: limit
+    :param offset: offset
+    """
+    while offset + limit < count:
+        offset += limit
+        yield offset
 
 
 class Session(object):
@@ -63,30 +76,34 @@ class Session(object):
                         logging.error(e)
                         attempts += 1
 
-                    # TODO: pluggable handling
-                    if response.status == 429:
-                        backoff = ratelimiter.get_backoff()
-                        logger.debug("Retrying request in %d seconds", backoff)
-                        await asyncio.sleep(backoff)
-
-        raise RuntimeError("Client retries exceeded for url %s" % url)
+                        # TODO: pluggable handling
+                        if response.status == 429:
+                            backoff = ratelimiter.get_backoff()
+                            logger.debug("Retrying request in %d seconds", backoff)
+                            await asyncio.sleep(backoff)
+                        else:
+                            raise
 
     async def get(self,
                   url: URL,
-                  jsonpath: str = None,
+                  jsonpath: Optional[str] = None,
                   retries: int = 3,
                   **parameters) -> List[List[Dict]]:
         """
         Will await a single request to get the first batch of data before executing subsequent
         requests (if required) according to offset logic. Jsonpath query is optionally executed
-        on json response data from each request
+        on json response data from each request.
+
+        :param url: yarl URL
+        :param jsonpath: Optional jsonpath query to process response data
+        :param retries: Retry count, passed to Session.request
+        :param parameters: API Request parameters
         """
 
-        newurl = URL(url)
         if parameters:
-            newurl = newurl.update_query(**parameters)
+            url = url.update_query(**parameters)
 
-        init_response = await self.request("GET", newurl, retries=retries)
+        init_response = await self.request("GET", url, retries=retries)
 
         results = [init_response]
 
@@ -99,8 +116,8 @@ class Session(object):
         if any((ir_count, ir_limit, ir_offset)):
 
             coros = [
-                self.request("GET", newurl.update_query(offset=offset), retries=retries)
-                for _, _, offset in generate_offsets(ir_count, ir_limit, ir_offset)
+                self.request("GET", url.update_query(offset=offset), retries=retries)
+                for offset in iter_offsets(ir_count, ir_limit, ir_offset)
             ]
 
             logger.debug("Planning %s additional requests" % len(coros))
@@ -118,7 +135,7 @@ class Session(object):
         """
         return self._session_cls(**self._session_kws)
 
-    def close(self):
+    def close(self) -> Awaitable:
         """
         Close the ClientSession
         """

@@ -1,18 +1,19 @@
-__all__ = ["ApiClient", "add_endpoints", "get_endpoints"]
+__all__ = ["ApiClient", "get_api_key", "get_client", "get_endpoints"]
 
 import asyncio
 import logging
+import os
 import urllib
-from typing import Any, Dict, List, Type
+import webbrowser
+from typing import Any, Dict, List, Optional, Type
 
 from aiohttp.typedefs import StrOrURL
 from pandas import DataFrame, concat
 from yarl import URL
 
-from fredio.const import FRED_DOC_URL
-from fredio.session import Session
-from fredio import utils
-
+from . import const
+from . import utils
+from . import session
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,8 @@ class ApiClient(object):
     """
 
     _children: Dict[str, "ApiClient"]  # TODO: get rid of mutability
-    _defaults: Dict[Any, Any] = dict()
-    _session: Session = None
+    _defaults: Dict[Any, Any] = dict()  # Default parameters for all client instances
+    _session: session.Session = None
 
     def __init__(self, url: StrOrURL):
         super(ApiClient, self).__init__()
@@ -34,7 +35,7 @@ class ApiClient(object):
 
     def __getattribute__(self, item: Any) -> Any:
         """
-        Hijack to allow for indexing using dot notation
+        Hijack to allow for accessing children using dot notation
         """
         try:
             return super(ApiClient, self).__getattribute__(item)
@@ -59,16 +60,21 @@ class ApiClient(object):
     def set_defaults(cls, **params) -> Type["ApiClient"]:
         """
         Set default query parameters for all endpoints
+
+        :param params: Request parameters that will be passed for every request
+        for all ApiClient instances
         """
         cls._defaults = params
         return cls
 
     @classmethod
-    def set_session(cls, session) -> Type["ApiClient"]:
+    def set_session(cls, ses: session.Session) -> Type["ApiClient"]:
         """
-        Set the ClientSession for this class
+        Set the Session for this class
+
+        :param ses: Session used by all ApiClient instances
         """
-        cls._session = session
+        cls._session = ses
         return cls
 
     @classmethod
@@ -76,7 +82,9 @@ class ApiClient(object):
         """
         Close the client session
         """
-        return utils.loop.run_until_complete(cls._session.close())
+        if cls._session is not None:
+            logger.info("Closing client session")
+            return utils.loop.run_until_complete(cls._session.close())
 
     @property
     def children(self) -> Dict[str, "ApiClient"]:
@@ -92,13 +100,15 @@ class ApiClient(object):
     @property
     def url(self) -> URL:
         """
-        Combine URL and query
+        Encode this client's URL with query parameters
         """
         return self._encode_url()
 
     def aget(self, **kwargs) -> asyncio.Task:
         """
-        Create an awaitable Task
+        Run an awaitable Task to get results from this endpoint
+
+        :param kwargs: Keyword arguments passed to Session.get
         """
         coro = self._session.get(self.url, **kwargs)
         task = utils.loop.create_task(coro)
@@ -106,45 +116,76 @@ class ApiClient(object):
 
     def get(self, **kwargs) -> List[Dict]:
         """
-        Get request results as a list. This method is blocking.
+        Get request results as a list of JSON. This method is blocking.
+
+        :param kwargs: Keyword arguments passed to Session.get
         """
         return utils.loop.run_until_complete(self.aget(**kwargs))
 
     def get_pandas(self, **kwargs) -> DataFrame:
         """
-        Get request results as a DataFrame. This method is blocking.
+        Get request results as a pandas DataFrame. This method is blocking.
+
+        :param kwargs: Keyword arguments passed to Session.get
         """
         return concat(map(DataFrame, self.get(**kwargs)))
 
 
 class _ApiDocs:
-    import webbrowser
+    """
+    Helper class containing webbrowser.open methods to open FRED documentation
+    corresponding to an ApiClient URL
+    """
 
     def __init__(self, url):
         self.url = url
 
     def make_url(self) -> URL:
-        subpath = (self.url.path
-                   .replace("/fred", "")
-                   .lstrip("/")
-                   .replace("/", "_"))
+        subpath = self.url.path.replace("/fred", "").lstrip("/").replace("/", "_")
+
         if subpath:
             subpath += ".html"
-        return URL(FRED_DOC_URL) / subpath
+
+        return URL(const.FRED_DOC_URL) / subpath
 
     def open(self) -> bool:
-        return self.webbrowser.open(str(self.make_url()))
+        return webbrowser.open(str(self.make_url()))
 
     def open_new(self) -> bool:
-        return self.webbrowser.open_new(str(self.make_url()))
+        return webbrowser.open_new(str(self.make_url()))
 
     def open_new_tab(self) -> bool:
-        return self.webbrowser.open_new_tab(str(self.make_url()))
+        return webbrowser.open_new_tab(str(self.make_url()))
+
+    open.__doc__ = webbrowser.open.__doc__
+    open_new.__doc__ = webbrowser.open_new.__doc__
+    open_new_tab.__doc__ = webbrowser.open_new_tab.__doc__
+
+
+def get_api_key() -> Optional[str]:
+    """
+    Get API key from FRED_API_KEY environment variable
+    """
+    return os.environ.get("FRED_API_KEY", None)
+
+
+def get_client() -> ApiClient:
+    """
+    Construct an ApiClient and add FRED endpoints.
+    """
+
+    client = ApiClient(const.FRED_API_URL)
+    add_endpoints(client, *const.FRED_API_ENDPOINTS)
+
+    return client
 
 
 def add_endpoints(client: ApiClient, *endpoints) -> None:
     """
-    Add an endpoint to the tree
+    Add an endpoint to the client instance
+
+    :param client: ApiClient
+    :param endpoints: URL subpaths to add to the ApiClient structure
     """
     for ep in endpoints:
         parent, *child = ep.split("/", 1)
@@ -153,9 +194,11 @@ def add_endpoints(client: ApiClient, *endpoints) -> None:
             add_endpoints(newpath, child[0])
 
 
-def get_endpoints(client: ApiClient) -> List[str]:
+def get_endpoints(client: ApiClient) -> List[URL]:
     """
-    Get all endpoints from the tree
+    Get all registered URLs from an ApiClient
+
+    :param client: ApiClient
     """
     endpoints = []
     for node in client.children.values():

@@ -24,12 +24,14 @@ class Event(object):
         self.name = name
         self.handlers = []
 
-    def add(self, listener: Callable) -> None:
+    def add(self, handler: Callable) -> None:
         """
-        Add a listener to this event
+        Add a handler to this event. Sync functions will be wrapped as a coroutine.
+
+        :param handler: Callable function
         """
-        self.handlers.append(coro(listener))
-        logger.info("Registered handler '%s' for event '%s'" % (listener.__name__, self.name))
+        self.handlers.append(coro(handler))
+        logger.info("Registered handler '%s' for event '%s'" % (handler.__name__, self.name))
 
     async def apply(self, *args, **kwargs) -> None:
         """
@@ -46,23 +48,24 @@ class Event(object):
 
 async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
     """
-    Produce an event
+    Places a tuple of (name, data) on the queue.
+
+    :param name: name
+    :param data: data
+    :param q: queue
     """
     return await q.put((name, data))
 
 
 async def consume(q: asyncio.Queue = queue) -> None:
     """
-    Consume an event
+    Consume an event from the queue, and call all handlers for this event
+
+    :param q: queue
     """
     name, event = await q.get()
     if name in _events:
         await _events[name].apply(event)
-
-
-async def _listen() -> None:
-    while True:
-        await consume(queue)
 
 
 def listen() -> bool:
@@ -70,6 +73,10 @@ def listen() -> bool:
     Start a background task to consume events
     """
     global _running
+
+    async def _listen() -> None:
+        while True:
+            await consume(queue)
 
     if not _running:
         logger.info("Listening for events: \n%s" % "\n".join(_events.keys()))
@@ -86,9 +93,12 @@ def running() -> bool:
     return _running
 
 
-def register(name: str, fn: Callable) -> None:
+def register(name: str, fn: Callable[..., Awaitable]) -> None:
     """
-    Register an event handler to globals
+    Register an event handler
+
+    :param name: Name of the event handler
+    :param fn:
     """
     _events.setdefault(name, Event(name)).add(fn)
 
@@ -98,6 +108,9 @@ def register(name: str, fn: Callable) -> None:
 def coro(fn: Callable[..., Any]) -> Callable[..., Awaitable]:
     """
     Ensures a function is awaitable
+
+    :param fn: Callable. Sync functions will be wrapped as a coroutine, while
+    coroutines will be left as-is
     """
     if inspect.iscoroutinefunction(fn):
         return fn
@@ -112,7 +125,9 @@ def coro(fn: Callable[..., Any]) -> Callable[..., Awaitable]:
 
 def on_event(name: str) -> Callable:
     """
-    Register an event handler to globals
+    Register an event handler
+
+    :param name: Name of the event that this handler should process
     """
     def wrapper(fn):
         register(name, fn)
