@@ -3,11 +3,12 @@ import types
 import unittest
 import webbrowser
 
+from aiohttp import ClientError
 from pandas import DataFrame
 
 from fredio.client import ApiClient
 from fredio.session import Session
-from fredio import configure, shutdown, utils
+from fredio import configure, shutdown
 
 
 class TestApiClient(unittest.TestCase):
@@ -42,9 +43,9 @@ class TestApiClient(unittest.TestCase):
         self.assertIsInstance(res, list)
         self.assertIsInstance(res[0], dict)
 
-    def test_session_runtime_error_on_bad_request(self):
+    def test_client_error_on_bad_request(self):
         loop = asyncio.get_event_loop()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ClientError):
             req = self.session.get(self.invalid_series_url, retries=0)
             loop.run_until_complete(req)
 

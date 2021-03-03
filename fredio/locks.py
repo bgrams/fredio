@@ -61,6 +61,9 @@ class RateLimiter(asyncio.BoundedSemaphore):
         return True
 
     def stop(self) -> bool:
+        """
+        Cancel the replenishment task
+        """
         if self.started:
             self._task.cancel()
         return True
@@ -75,7 +78,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
 
     async def replenish(self) -> None:
         """
-        Run a continuous loop to periodically release all locks from a previous epoch.
+        Run a continuous loop to periodically release all locks from previous epochs.
 
         https://stackoverflow.com/a/48685838
         """
@@ -86,7 +89,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
             new_counter = self.get_counter()
             if new_counter > counter:
 
-                waiting = self._bound_value - self._value
+                waiting = len(self._releases)
                 logger.debug("Replenishing (epoch: %d waiting: %d)" % (new_counter, waiting))
 
                 while self._releases:
@@ -107,7 +110,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
 
     def release(self) -> None:
         """
-        Delayed override, releases are periodically handled by `replenish()`
+        Schedule a lock to be released in the next epoch
         """
         self._releases.append((self._timer(), self.get_counter()))
 
@@ -122,11 +125,11 @@ def get_rate_limiter() -> RateLimiter:
     return _ratelimiter
 
 
-def set_rate_limit(limit: int) -> bool:
-    """
+def set_rate_limit(limit: int = const.FRED_API_RATE_LIMIT) -> bool:
+    f"""
     Reset the global ratelimiter with a new limit.
-
-    Not threadsafe
+    
+    :param limit: Number of requests per minute. Should be < {const.FRED_API_RATE_LIMIT}
     """
     if limit > const.FRED_API_RATE_LIMIT:
         raise ValueError("Limit must be <= %d" % const.FRED_API_RATE_LIMIT)
