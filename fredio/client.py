@@ -8,7 +8,7 @@ import webbrowser
 from typing import Any, Dict, List, Optional, Type
 
 from aiohttp.typedefs import StrOrURL
-from pandas import DataFrame, concat
+from pandas import DataFrame
 from yarl import URL
 
 from . import const
@@ -128,7 +128,7 @@ class ApiClient(object):
 
         :param kwargs: Keyword arguments passed to Session.get
         """
-        return concat(map(DataFrame, self.get(**kwargs)))
+        return DataFrame.from_records(self.get(**kwargs))
 
 
 class _ApiDocs:

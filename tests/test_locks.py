@@ -58,13 +58,5 @@ class TestDefaultRateLimiting(unittest.TestCase):
         self.assertIsNot(rl1, rl2)
 
 
-class TetRatelimiterExceptions(unittest.TestCase):
-
-    def test_runtime_error_acquire_not_started(self):
-        with self.assertRaises(RuntimeError):
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(locks.RateLimiter(1, 1).acquire())
-
-
 if __name__ == "__main__":
     unittest.main()

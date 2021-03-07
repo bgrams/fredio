@@ -14,37 +14,51 @@ logger = logging.getLogger(__name__)
 
 class RateLimiter(asyncio.BoundedSemaphore):
     """
-    Rate-limiting implementation using a BoundedSemaphore to block when all locks
-    are acquired. Locks are only released on a specified interval via the `replenish`
-    method which runs as a background task.
+    Rate-limiting implementation using a BoundedSemaphore.
+    Locks are only released on a specified interval via the `replenish` loop
+    which runs as a background task.
     """
 
     _bound_value: int
     _loop: asyncio.BaseEventLoop
 
     def __init__(self,
-                 value: int = const.FRED_API_RATE_LIMIT,
+                 limit: int = const.FRED_API_RATE_LIMIT,
                  period: int = const.FRED_API_RATE_RESET,
                  *,
                  loop: asyncio.BaseEventLoop = utils.loop):
 
-        super(RateLimiter, self).__init__(value, loop=loop)
+        super(RateLimiter, self).__init__(limit, loop=loop)
+
+        # Store the delta between monotonic and system time to define
+        # a point of reference
+        self._deltat = time.time() - self._loop.time()
 
         self._period = period
         self._releases = deque()
         self._task = None
 
-        self._timer = time.time
+    def _timer(self) -> float:
+        """
+        Monotonic time synced with the system
+        """
+        return self._loop.time() + self._deltat
 
     @property
     def started(self) -> bool:
         return self._task is not None
 
-    def get_backoff(self) -> int:
+    def get_backoff(self, ceil: bool = True) -> float:
         """
-        Get number of seconds until the next epoch
+        Get number of seconds until the next count
+
+        :param ceil: Round backoff time up to the closest integer
         """
-        return int(math.ceil(self._period - self._timer() % self._period))
+        backoff = self._period - self._timer() % self._period
+
+        if ceil:
+            return float(math.ceil(backoff))
+        return backoff
 
     def get_counter(self) -> int:
         """
@@ -54,7 +68,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
 
     def start(self) -> bool:
         """
-        Create background replenishment task. Can be called idempotently.
+        Create background replenishment task. Can be called more than once.
         """
         if not self.started:
             self._task = self._loop.create_task(self.replenish())
@@ -66,51 +80,46 @@ class RateLimiter(asyncio.BoundedSemaphore):
         """
         if self.started:
             self._task.cancel()
+            self._task = None
         return True
 
     async def acquire(self) -> bool:
         """
         Acquire a lock
         """
-        if not self.started:
-            raise RuntimeError("Rate limiter must be started via start()")
+        self.start()
+
         return await super(RateLimiter, self).acquire()
 
     async def replenish(self) -> None:
         """
-        Run a continuous loop to periodically release all locks from previous epochs.
+        Run a continuous loop to periodically release all locks from the
+        previous count.
 
         https://stackoverflow.com/a/48685838
         """
-        counter = self.get_counter()
 
         while True:
+            while self._releases:
 
-            new_counter = self.get_counter()
-            if new_counter > counter:
+                # Peek and compare counters
+                # A lock will only be released if scheduled from a previous count
+                if self._releases[0][1] <= self.get_counter():
 
-                waiting = len(self._releases)
-                logger.debug("Replenishing (epoch: %d waiting: %d)" % (new_counter, waiting))
+                    ts, ct = self._releases.popleft()
+                    super(RateLimiter, self).release()
 
-                while self._releases:
+                    logger.debug("Released lock from counter %d (elapsed: %.4f)"
+                                 % (ct, self._timer() - ts))
+                else:
+                    break
 
-                    # Use comparator to control for a situation where a lock may be acquired
-                    # while replenishment is running
-                    if new_counter > self._releases[0][1]:
-                        super(RateLimiter, self).release()
-                        ts, ct = self._releases.popleft()
-
-                        elapsed = self._timer() - ts
-                        logger.debug("Released lock from epoch %d (elapsed: %.4f)" % (ct, elapsed))
-                    else:
-                        break
-
-                counter = new_counter
-            await asyncio.sleep(0)
+            # Sleep until the next count
+            await asyncio.sleep(self.get_backoff(False))
 
     def release(self) -> None:
         """
-        Schedule a lock to be released in the next epoch
+        Schedule a lock to be released in the next counter
         """
         self._releases.append((self._timer(), self.get_counter()))
 
@@ -126,10 +135,10 @@ def get_rate_limiter() -> RateLimiter:
 
 
 def set_rate_limit(limit: int = const.FRED_API_RATE_LIMIT) -> bool:
-    f"""
+    """
     Reset the global ratelimiter with a new limit.
     
-    :param limit: Number of requests per minute. Should be < {const.FRED_API_RATE_LIMIT}
+    :param limit: Number of requests per minute. Should be < 120
     """
     if limit > const.FRED_API_RATE_LIMIT:
         raise ValueError("Limit must be <= %d" % const.FRED_API_RATE_LIMIT)

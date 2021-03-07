@@ -1,6 +1,7 @@
 __all__ = ["Session"]
 
 import asyncio
+import itertools
 import logging
 from typing import Any, Awaitable, List, Dict, Generator, Optional
 
@@ -56,7 +57,6 @@ class Session(object):
         :param kwargs: Request parameters
         """
         ratelimiter = locks.get_rate_limiter()
-        ratelimiter.start()
 
         async with ratelimiter:
 
@@ -88,7 +88,7 @@ class Session(object):
                   url: URL,
                   jsonpath: Optional[str] = None,
                   retries: int = 3,
-                  **parameters) -> List[List[Dict]]:
+                  **parameters) -> List[Dict]:
         """
         Will await a single request to get the first batch of data before executing subsequent
         requests (if required) according to offset logic. Jsonpath query is optionally executed
@@ -124,8 +124,9 @@ class Session(object):
             results.extend(await asyncio.gather(*coros))
 
         if jsonpath:
-            jparsed = jsonpath_rw.parse(jsonpath)
-            return list(map(lambda x: [i.value for i in jparsed.find(x)], results))
+            parsed = jsonpath_rw.parse(jsonpath)
+            mapped = map(lambda x: [i.value for i in parsed.find(x)], results)
+            return list(itertools.chain.from_iterable(mapped))
         return results
 
     @reify
@@ -133,6 +134,7 @@ class Session(object):
         """
         Return a ClientSession instance (cached)
         """
+        logger.info("Initializing %s" % self._session_cls.__name__)
         return self._session_cls(**self._session_kws)
 
     def close(self) -> Awaitable:

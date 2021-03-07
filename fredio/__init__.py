@@ -26,8 +26,6 @@ def configure(api_key: Optional[str] = None,
         msg = "Api key must be provided or passed as environment variable FRED_API_KEY"
         raise ValueError(msg)
 
-    shutdown()
-
     ses = session.Session(**session_kwargs)
 
     client_ = client.get_client()
