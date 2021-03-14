@@ -7,7 +7,7 @@ import asyncio
 import inspect
 import logging
 from functools import wraps
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional, Union
 
 from . import utils
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 queue = asyncio.Queue()
 
 _events = dict()  # TODO: This may need a lock
-_running = False
+_task: Optional[asyncio.Task] = None
 
 
 class Event(object):
@@ -43,7 +43,7 @@ class Event(object):
             try:
                 await utils.loop.create_task(handler(*args, **kwargs))
             except Exception as e:
-                logger.error(e)
+                logger.exception(e)
 
 
 async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
@@ -68,29 +68,44 @@ async def consume(q: asyncio.Queue = queue) -> None:
         await _events[name].apply(event)
 
 
+async def cancel(timeout: Optional[Union[float, int]] = None):
+    global _task
+
+    if running():
+        try:
+            logger.debug("Flushing %d remaining tasks" % queue.qsize())
+            await asyncio.wait_for(queue.join(), timeout=timeout)
+        except asyncio.TimeoutError as e:
+            logger.exception(e)
+        finally:
+            _task.cancel()
+    _task = None
+
+
 def listen() -> bool:
     """
     Start a background task to consume events
     """
-    global _running
+    global _task
 
     async def _listen() -> None:
         while True:
             await consume(queue)
 
-    if not _running:
+    if not running():
         logger.info("Listening for events: \n%s" % "\n".join(_events.keys()))
+        _task = utils.loop.create_task(_listen())
 
-        utils.loop.create_task(_listen())
-        _running = True
     return True
 
 
 def running() -> bool:
     """
-    Is the event listener running?
+    Is the consumer task running?
     """
-    return _running
+    if _task is not None:
+        return not _task.done()
+    return False
 
 
 def register(name: str, fn: Callable[..., Awaitable]) -> None:

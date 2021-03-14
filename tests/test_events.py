@@ -21,17 +21,19 @@ class TestEvents(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls.event = events.Event("foo")
         cls.loop = utils.loop
 
     @classmethod
     def tearDownClass(cls):
-        print("Cancelling all tasks")
-        tasks = utils.get_all_tasks()
-        for task in tasks:
-            task.cancel()
+
+        # Add a passthrough handler to consumer all lingering events
+        # This should be handled by the atexit callback but JIC
+        cls.event.add(lambda x: x)
+        cls.loop.run_until_complete(events.cancel())
+        utils.cancel_running_tasks()
 
     def setUp(self):
-        self.event = events.Event("foo")
         events._events = dict()
 
     def assertEvent(self, name: str, test_handlers: bool = True):

@@ -46,7 +46,13 @@ def shutdown():
     Shutdown this fredio appilication. Cancels all running tasks in this event
     loop and closes the aiothttp.ClientSession
     """
+    # Flush all events and cancel
+    utils.loop.run_until_complete(events.cancel())
+
+    # Cancel other tasks (ratelimiter & others)
     utils.cancel_running_tasks()
+
+    # Close aiohttp session
     client.get_client().close_session()
 
 
