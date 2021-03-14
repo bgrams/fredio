@@ -66,6 +66,7 @@ async def consume(q: asyncio.Queue = queue) -> None:
     name, event = await q.get()
     if name in _events:
         await _events[name].apply(event)
+    q.task_done()
 
 
 async def cancel(timeout: Optional[Union[float, int]] = None):
