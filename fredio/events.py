@@ -5,46 +5,52 @@ __all__ = [
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from . import utils
+
 
 logger = logging.getLogger(__name__)
 
 queue = asyncio.Queue()
 
-_events = dict()  # TODO: This may need a lock
+_events: Dict[str, "Event"] = dict()  # TODO: This may need a lock
 _task: Optional[asyncio.Task] = None
 
 
 class Event(object):
+
     def __init__(self, name: str):
         self.name = name
-        self.handlers = []
+
+        self._handlers = []
+        self._frozen = False
 
     def add(self, handler: Callable) -> None:
         """
         Add a handler to this event. Sync functions will be wrapped as
         a coroutine.
 
-        :param handler: Callable function
+        :param handler: Callable function or coroutine
         """
-        self.handlers.append(asyncio.coroutine(handler))
+        if self._frozen:
+            raise RuntimeError("Cannot modify frozen event")
+
+        self._handlers.append(asyncio.coroutine(handler))
         logger.info("Registered handler '%s' for event '%s'"
                     % (handler.__name__, self.name))
 
+    def freeze(self):
+        self._frozen = True
+
     async def apply(self, *args, **kwargs) -> None:
         """
-        Call all event handlers for this event. Handlers will execute sequentially,
-        and exceptions will not be raised
+        Call all event handlers for this event.
         """
         logger.debug("Received event '%s'" % self.name)
 
-        for handler in self.handlers:
-            try:
-                await handler(*args, **kwargs)
-            except Exception as e:
-                logger.exception(e)
+        for handler in self._handlers:
+            await handler(*args, **kwargs)
 
 
 async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
@@ -112,6 +118,10 @@ def listen() -> bool:
             await consume(queue)
 
     if not running():
+
+        for ev in _events.values():
+            ev.freeze()
+
         logger.info("Listening for events: \n%s" % "\n".join(_events.keys()))
         _task = utils.loop.create_task(_listen())
 

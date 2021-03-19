@@ -49,7 +49,7 @@ class TestEvents(unittest.TestCase):
 
     def test_event_add(self):
         self.event.add(lambda x: x)
-        self.assertEqual(len(self.event.handlers), 1)
+        self.assertEqual(len(self.event._handlers), 1)
 
     def test_event_apply(self):
         _sentinel = sentinel()
