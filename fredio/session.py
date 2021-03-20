@@ -28,8 +28,6 @@ class Session(object):
         self._session_kws = kwargs
 
         self._session = None
-        self._ratelimiter = locks.get_rate_limiter()
-        self._ratelimiter.start()
 
     @property
     def session(self) -> ClientSession:
@@ -55,11 +53,12 @@ class Session(object):
         :param kwargs: Request parameters
         """
         kwargs.setdefault("raise_for_status", True)
+        ratelimiter = locks.get_rate_limiter()
 
         attempts = 0
         while attempts <= retries:
             try:
-                async with self._ratelimiter:
+                async with ratelimiter:
                     async with self.session.request(method, url, **kwargs) as response:
 
                         attempts += 1
@@ -75,7 +74,7 @@ class Session(object):
                 logging.error(e)
 
                 if e.status == 429:
-                    backoff = self._ratelimiter.get_backoff()
+                    backoff = ratelimiter.get_backoff()
                     logger.debug("Retrying request in %d seconds" % backoff)
                     await asyncio.sleep(backoff)
                 else:
