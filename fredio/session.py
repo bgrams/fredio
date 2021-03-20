@@ -3,11 +3,11 @@ __all__ = ["Session"]
 import asyncio
 import itertools
 import logging
+from functools import partial
 from typing import Any, Awaitable, List, Dict, Generator, Optional
 
 import jsonpath_rw
 from aiohttp import ClientSession
-from aiohttp.helpers import reify  # TODO: use something else to avoid class cache
 from yarl import URL
 
 from . import events
@@ -41,7 +41,17 @@ class Session(object):
         self._session_cls = ClientSession
         self._session_kws = kwargs
 
-        self._cache = dict()  # for property persistence
+        self._session = None
+
+    @property
+    def session(self) -> ClientSession:
+        """
+        Return a ClientSession instance (cached)
+        """
+        if self._session is None:
+            logger.info("Initializing %s" % self._session_cls.__name__)
+            self._session = self._session_cls(**self._session_kws)
+        return self._session
 
     async def request(self,
                       method: str,
@@ -129,16 +139,9 @@ class Session(object):
             return list(itertools.chain.from_iterable(mapped))
         return results
 
-    @reify
-    def session(self) -> ClientSession:
-        """
-        Return a ClientSession instance (cached)
-        """
-        logger.info("Initializing %s" % self._session_cls.__name__)
-        return self._session_cls(**self._session_kws)
-
-    def close(self) -> Awaitable:
+    async def close(self) -> None:
         """
         Close the ClientSession
         """
-        return self.session.close()
+        await self.session.close()
+        self._session = None
