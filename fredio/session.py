@@ -29,6 +29,7 @@ class Session(object):
 
         self._session = None
         self._ratelimiter = locks.get_rate_limiter()
+        self._ratelimiter.start()
 
     @property
     def session(self) -> ClientSession:
