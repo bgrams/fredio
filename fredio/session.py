@@ -7,7 +7,7 @@ from functools import partial
 from typing import Any, Awaitable, List, Dict, Generator, Optional
 
 import jsonpath_rw
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientResponseError
 from yarl import URL
 
 from . import events
@@ -42,6 +42,7 @@ class Session(object):
         self._session_kws = kwargs
 
         self._session = None
+        self._ratelimiter = locks.get_rate_limiter()
 
     @property
     def session(self) -> ClientSession:
@@ -66,33 +67,32 @@ class Session(object):
         :param retries: Maximum number of request retries
         :param kwargs: Request parameters
         """
-        ratelimiter = locks.get_rate_limiter()
+        kwargs.setdefault("raise_for_status", True)
 
-        async with ratelimiter:
+        attempts = 0
+        while attempts <= retries:
+            try:
+                async with self._ratelimiter:
+                    async with self.session.request(method, url, **kwargs) as response:
 
-            attempts = 0
-            while attempts <= retries:
-                async with self.session.request(method, url, **kwargs) as response:
-                    try:
-                        response.raise_for_status()
-                        data = await response.json()
+                        attempts += 1
 
                         # Emit an event with name corresponding to the final endpoint
                         if events.running():
                             name = response.url.path.split("/")[-1]
-                            await events.produce(name, data)  # TODO: is this thread safe?
-                        return data
-                    except Exception as e:
-                        logging.error(e)
-                        attempts += 1
+                            await events.produce(name, response)
 
-                        # TODO: pluggable handling
-                        if response.status == 429:
-                            backoff = ratelimiter.get_backoff()
-                            logger.debug("Retrying request in %d seconds", backoff)
-                            await asyncio.sleep(backoff)
-                        else:
-                            raise
+                        return await response.json()
+
+            except ClientResponseError as e:
+                logging.error(e)
+
+                if e.status == 429:
+                    backoff = self._ratelimiter.get_backoff()
+                    logger.debug("Retrying request in %d seconds" % backoff)
+                    await asyncio.sleep(backoff)
+                else:
+                    raise
 
     async def get(self,
                   url: URL,
@@ -115,14 +115,13 @@ class Session(object):
 
         init_response = await self.request("GET", url, retries=retries)
 
-        results = [init_response]
-
         ir_count = init_response.get("count")
         ir_limit = init_response.get("limit")
         ir_offset = init_response.get("offset")
 
         logger.debug("Count: %s, Limit: %s, Offset: %s" % (ir_count, ir_limit, ir_offset))
 
+        results = [init_response]
         if any((ir_count, ir_limit, ir_offset)):
 
             coros = [
