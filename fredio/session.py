@@ -61,8 +61,6 @@ class Session(object):
                 async with ratelimiter:
                     async with self.session.request(method, url, **kwargs) as response:
 
-                        attempts += 1
-
                         # Emit an event with name corresponding to the final endpoint
                         if events.running():
                             name = response.url.path.split("/")[-1]
@@ -71,9 +69,12 @@ class Session(object):
                         return await response.json()
 
             except ClientResponseError as e:
+                attempts += 1
                 logging.error(e)
 
-                if e.status == 429:
+                if attempts > retries:
+                    raise
+                elif e.status == 429:
                     backoff = ratelimiter.get_backoff()
                     logger.debug("Retrying request in %d seconds" % backoff)
                     await asyncio.sleep(backoff)
