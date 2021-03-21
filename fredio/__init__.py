@@ -3,19 +3,19 @@ __all__ = ["configure", "shutdown", "client", "events"]
 import atexit
 from typing import Optional
 
-from . import client, const, events, locks, session, utils
+from . import client, events, locks, session, utils
 
 
 def configure(api_key: Optional[str] = None,
               rate_limit: Optional[int] = None,
               enable_events: bool = False,
               **session_kwargs) -> client.ApiClient:
-    f"""
+    """
     Configure this fredio application
-    
-    :param api_key: FRED API key. If None, will be retrived from environment 
+
+    :param api_key: FRED API key. If None, will be retrived from environment
     variable FRED_API_KEY
-    :param rate_limit: API rate limit. Must be <= {const.FRED_API_RATE_LIMIT}.
+    :param rate_limit: API rate limit. Must be <= 120.
     :param enable_events: Should fredio events be enabled?
     :param session_kwargs: Keyword arguments passed to aiohttp.ClientSession
     """

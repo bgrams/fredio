@@ -34,7 +34,8 @@ class TestDefaultRateLimiting(unittest.TestCase):
         self.assertAlmostEqual(backoff, 1)
 
     def test_get_rate_limiter_counter(self):
-        timestamp, counter = self.ratelimiter._timer(), self.ratelimiter.get_counter() * self.period
+        timestamp = self.ratelimiter._timer()
+        counter = self.ratelimiter.get_counter() * self.period
         self.assertAlmostEqual(int(counter), int(timestamp))
 
     def test_acquire_release(self):

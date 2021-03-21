@@ -1,49 +1,56 @@
 __all__ = [
     "Event", "produce", "consume", "listen",
-    "running", "register", "coro", "on_event"
+    "running", "register", "on_event"
 ]
 
 import asyncio
-import inspect
 import logging
-from functools import wraps
-from typing import Any, Awaitable, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from . import utils
+
 
 logger = logging.getLogger(__name__)
 
 queue = asyncio.Queue()
 
-_events = dict()  # TODO: This may need a lock
+_events: Dict[str, "Event"] = dict()  # TODO: This may need a lock
 _task: Optional[asyncio.Task] = None
 
 
 class Event(object):
+
     def __init__(self, name: str):
         self.name = name
-        self.handlers = []
+
+        self._handlers = []
+        self._frozen = False
 
     def add(self, handler: Callable) -> None:
         """
-        Add a handler to this event. Sync functions will be wrapped as a coroutine.
+        Add a handler to this event. Sync functions will be wrapped as
+        a coroutine.
 
-        :param handler: Callable function
+        :param handler: Callable function or coroutine
         """
-        self.handlers.append(coro(handler))
-        logger.info("Registered handler '%s' for event '%s'" % (handler.__name__, self.name))
+        if self._frozen:
+            raise RuntimeError("Cannot modify frozen event")
+
+        self._handlers.append(asyncio.coroutine(handler))
+        logger.info("Registered handler '%s' for event '%s'"
+                    % (handler.__name__, self.name))
+
+    def freeze(self):
+        self._frozen = True
 
     async def apply(self, *args, **kwargs) -> None:
         """
-        Call all event handlers for this event
+        Call all event handlers for this event.
         """
-        logger.info("Received event '%s'" % self.name)
+        logger.debug("Received event '%s'" % self.name)
 
-        for handler in self.handlers:
-            try:
-                await utils.loop.create_task(handler(*args, **kwargs))
-            except Exception as e:
-                logger.exception(e)
+        for handler in self._handlers:
+            await handler(*args, **kwargs)
 
 
 async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
@@ -59,28 +66,45 @@ async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
 
 async def consume(q: asyncio.Queue = queue) -> None:
     """
-    Consume an event from the queue, and call all handlers for this event
+    Consume an event from the queue, and create a task to call all
+    handlers for this event.
 
     :param q: queue
     """
     name, event = await q.get()
     if name in _events:
-        await _events[name].apply(event)
+        utils.loop.create_task(_events[name].apply(event))
     q.task_done()
 
 
-async def cancel(timeout: Optional[Union[float, int]] = None):
+def flush(timeout: Optional[Union[float, int]] = None) -> Awaitable:
+    """
+    Flush all remaining tasks from the queue
+
+    :param timeout: Timeout (seconds) after which TimeoutError will be raised.
+    """
+    return asyncio.wait_for(queue.join(), timeout)
+
+
+async def cancel(timeout: Optional[Union[float, int]] = None) -> None:
+    """
+    Cancel the consumer task. Pending events in the queue will be flushed
+    with a timeout.
+
+    :param timeout: Timeout (seconds) after which TimeoutError will be raised.
+    """
     global _task
 
     if running():
+        logger.debug("Flushing %d remaining tasks" % queue.qsize())
+
         try:
-            logger.debug("Flushing %d remaining tasks" % queue.qsize())
-            await asyncio.wait_for(queue.join(), timeout=timeout)
+            await flush(timeout)
         except asyncio.TimeoutError as e:
             logger.exception(e)
         finally:
             _task.cancel()
-    _task = None
+            _task = None
 
 
 def listen() -> bool:
@@ -94,6 +118,10 @@ def listen() -> bool:
             await consume(queue)
 
     if not running():
+
+        for ev in _events.values():
+            ev.freeze()
+
         logger.info("Listening for events: \n%s" % "\n".join(_events.keys()))
         _task = utils.loop.create_task(_listen())
 
@@ -120,24 +148,6 @@ def register(name: str, fn: Callable[..., Awaitable]) -> None:
 
 
 # --- decorators --- #
-
-def coro(fn: Callable[..., Any]) -> Callable[..., Awaitable]:
-    """
-    Ensures a function is awaitable
-
-    :param fn: Callable. Sync functions will be wrapped as a coroutine, while
-    coroutines will be left as-is
-    """
-    if inspect.iscoroutinefunction(fn):
-        return fn
-
-    @wraps(fn)
-    async def coro_wrap(*args, **kwargs):
-        await asyncio.sleep(0)
-        return fn(*args, **kwargs)
-
-    return coro_wrap
-
 
 def on_event(name: str) -> Callable:
     """

@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import unittest
 from fredio import events
 from fredio import utils
@@ -36,14 +35,9 @@ class TestEvents(unittest.TestCase):
     def setUp(self):
         events._events = dict()
 
-    def assertEvent(self, name: str, test_handlers: bool = True):
+    def assertEvent(self, name: str):
         self.assertIn(name, events._events.keys())
         self.assertIsInstance(events._events[name], events.Event)
-
-        if test_handlers:
-            handlers = events._events[name].handlers
-            for handler in handlers:
-                self.assertTrue(inspect.iscoroutinefunction(handler))
 
     def assertNumRunningTasks(self, num: int):
 
@@ -54,7 +48,7 @@ class TestEvents(unittest.TestCase):
 
     def test_event_add(self):
         self.event.add(lambda x: x)
-        self.assertEqual(len(self.event.handlers), 1)
+        self.assertEqual(len(self.event._handlers), 1)
 
     def test_event_apply(self):
         _sentinel = sentinel()
@@ -100,6 +94,10 @@ class TestEvents(unittest.TestCase):
         self.assertFalse(events.running())
         self.assertTrue(events.listen())
         self.assertTrue(events.running())
+
+        # with self.assertRaises(TypeError):
+        #     events.register("foo", lambda x: x)
+
         self.assertNumRunningTasks(1)
 
 

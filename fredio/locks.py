@@ -137,7 +137,7 @@ def get_rate_limiter() -> RateLimiter:
 def set_rate_limit(limit: int = const.FRED_API_RATE_LIMIT) -> bool:
     """
     Reset the global ratelimiter with a new limit.
-    
+
     :param limit: Number of requests per minute. Should be < 120
     """
     if limit > const.FRED_API_RATE_LIMIT:
