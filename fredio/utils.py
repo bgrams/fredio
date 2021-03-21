@@ -1,8 +1,7 @@
-__all__ = ["KeyMaskingFormatter", "get_all_tasks"]
+__all__ = ["get_all_tasks"]
 
 import asyncio
 import logging
-import re
 import sys
 from typing import Set
 
@@ -10,21 +9,6 @@ logger = logging.getLogger(__name__)
 
 # Main event loop
 loop = asyncio.get_event_loop()
-
-
-class KeyMaskingFormatter(logging.Formatter):
-    """
-    Formatter that removes sensitive information in urls.
-    """
-
-    apikey_re = re.compile(r'(?<=api_key=)([\w])+(?=[^\w]?)')
-
-    def _filter(self, record):
-        return self.apikey_re.sub("<masked>", record)
-
-    def format(self, record):
-        original = super(KeyMaskingFormatter, self).format(record)
-        return self._filter(original)
 
 
 def get_all_tasks() -> Set[asyncio.Task]:

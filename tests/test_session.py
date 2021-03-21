@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+import sys
 from unittest.mock import patch, MagicMock
 from typing import Any, Union
 
@@ -14,7 +15,6 @@ from fredio import configure, locks, utils
 
 def mock_fred_response(method: str,
                        url: URL,
-                       future: bool = True,
                        count: int = 0,
                        limit: int = 0,
                        offset: int = 0):
@@ -42,10 +42,11 @@ def mock_fred_response(method: str,
 
     response._headers = {"Content-Type": "application/json"}
 
-    if future:
-        fut = asyncio.Future()
-        fut.set_result(response)
-        return fut
+    # Why
+    if sys.version_info < (3, 8):
+        future = asyncio.Future()
+        future.set_result(response)
+        return future
 
     return response
 
