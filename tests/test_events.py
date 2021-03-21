@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import unittest
 from fredio import events
 from fredio import utils

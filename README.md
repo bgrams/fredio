@@ -52,36 +52,54 @@ client.series.docs.open()
 .to_csv("gdp.csv", index=False))
 ```
 
-#### Using the Events API
+#### Using the Events API (Experimental)
 Events are not enabled by default, but can be by passing `enable_events=True` to
-the main configuration function. The request Session will queue json data for all successful responses
-in the form of `(name, data)`, where `name` corresponds to the final path in the URL endpoint. jsonpath queries
-are not applied to event data.
+the main configuration function. The request Session will queue all successful HTTP responses
+in the form of `(name, response)`, where `name` corresponds to the final path in the URL endpoint.
 
-Note: Experimental (!!)
 ```python
 import asyncio
-import pprint
-
 import fredio
+
 from fredio.events import on_event
 
-# Register a handler to process json data from ALL /fred/.../series endpoints
+# Register a handler to process HTTP responses from ALL /fred/.../series endpoints
 # Sync functions defined here will be wrapped in a coroutine
 @on_event("series")
-async def print_series(data):
-    await asyncio.sleep(0)
-    pprint.pprint(data)
+async def print_series(response):
+    json = await response.json()
+
+    series_id = json["seriess"][0]["id"]
+    print("Got series id %s" % series_id)
+    
+    # Request categories for this series id
+    # Subsequent response will be processed by "categories" handlers
+    client = fredio.client.get_client()
+    await client.series.categories.aget(series_id=series_id)
 
     
-async def main(fred):
+@on_event("categories")
+async def print_categories(response):
+    json = await response.json()
+    
+    for category in json["categories"]:
+        print("Got category id %s" % category["id"])
+
+    
+# Periodically request info for a given series id
+# This will place a response in the event queue where it
+# can be picked up and processed by registered event handlers
+async def main(fred, series_id):
     while True:
-        await fred.series.aget(series_id="EFFR")
+        print("Requesting series %s" % series_id)
+        await fred.series.aget(series_id=series_id)
         await asyncio.sleep(60)
 
+        
 if __name__ == "__main__":
     client = fredio.configure(enable_events=True)
-
-    asyncio.run(main(client))
     
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main(client, "GDP"))
+
 ```
