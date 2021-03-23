@@ -36,7 +36,7 @@ class Event(object):
         if self._frozen:
             raise RuntimeError("Cannot modify frozen event")
 
-        self._handlers.append(asyncio.coroutine(handler))
+        self._handlers.append(utils.coroutine(handler))
         logger.info("Registered handler '%s' for event '%s'"
                     % (handler.__name__, self.name))
 
@@ -66,15 +66,21 @@ async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
 
 async def consume(q: asyncio.Queue = queue) -> None:
     """
-    Consume an event from the queue, and create a task to call all
-    handlers for this event.
+    Consume an event from the queue, and create a Task to call all
+    handlers for this event. A callback is added to the Task to indicate
+    completion to the queue such that queue.join() can eventually unblock
+    once called.
 
     :param q: queue
     """
     name, event = await q.get()
+
     if name in _events:
-        utils.loop.create_task(_events[name].apply(event))
-    q.task_done()
+        coro = _events[name].apply(event)
+        task = utils.loop.create_task(coro)
+        task.add_done_callback(lambda x: q.task_done())
+    else:
+        q.task_done()
 
 
 def flush(timeout: Optional[Union[float, int]] = None) -> Awaitable:
