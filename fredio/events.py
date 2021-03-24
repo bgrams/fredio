@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 queue = asyncio.Queue()
 
-_events: Dict[str, "Event"] = dict()  # TODO: This may need a lock
+_events: Dict[str, "Event"] = dict()
 _task: Optional[asyncio.Task] = None
 
 
@@ -49,8 +49,11 @@ class Event(object):
         """
         logger.debug("Received event '%s'" % self.name)
 
-        for handler in self._handlers:
-            await handler(*args, **kwargs)
+        try:
+            for handler in self._handlers:
+                await handler(*args, **kwargs)
+        except Exception as e:
+            logger.exception(e)
 
 
 async def produce(name: str, data: Any, q: asyncio.Queue = queue) -> None:
