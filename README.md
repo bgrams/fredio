@@ -25,7 +25,7 @@ In-memory response data can also be queried by the client using jsonpath, suppor
 
 ### Installation:
 ```bash
-pip install git+https://github.com/bgrams/fredio.git
+pip install fredio
 ```
 
 ### Examples
