@@ -105,9 +105,16 @@ async def cancel(timeout: Optional[Union[float, int]] = None) -> None:
     global _task
 
     if running():
-        logger.debug("Flushing %d remaining tasks" % queue.qsize())
+
+        # What happens when a TimeoutError occurs?
+        # This is actually kinda odd since there's no logic to identify running tasks
+        # that have been started by the consumer.
+        # TODO: Ideally these can all be identified and cancelled.
 
         try:
+            logger.debug("Flushing %d remaining tasks (running: %d)"
+                         % (queue.qsize(), queue._unfinished_tasks))  # noqa
+
             await flush(timeout)
         except asyncio.TimeoutError as e:
             logger.exception(e)
@@ -131,7 +138,7 @@ def listen() -> bool:
         for ev in _events.values():
             ev.freeze()
 
-        logger.info("Listening for events: \n%s" % "\n".join(_events.keys()))
+        logger.debug("Listening for events: \n%s" % "\n".join(_events.keys()))
         _task = utils.loop.create_task(_listen())
 
     return True

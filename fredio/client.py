@@ -83,8 +83,8 @@ class ApiClient(object):
         Close the client session
         """
         if cls._session is not None:
-            logger.info("Closing client session")
-            return utils.loop.run_until_complete(cls._session.close())
+            coro = cls._session.close()
+            return utils.loop.run_until_complete(coro)
 
     @property
     def children(self) -> Dict[str, "ApiClient"]:
@@ -120,7 +120,8 @@ class ApiClient(object):
 
         :param kwargs: Keyword arguments passed to Session.get
         """
-        return utils.loop.run_until_complete(self.aget(**kwargs))
+        task = self.aget(**kwargs)
+        return utils.loop.run_until_complete(task)
 
     def get_pandas(self, **kwargs) -> DataFrame:
         """

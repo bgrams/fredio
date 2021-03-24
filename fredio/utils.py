@@ -29,7 +29,7 @@ def cancel_running_tasks() -> None:
     """
     for task in get_all_tasks():
         if not task.done():
-            logger.info("Cancelling task %s" % task)
+            logger.debug("Cancelling task %s" % task)
             task.cancel()
 
 

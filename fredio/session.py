@@ -35,7 +35,7 @@ class Session(object):
         Return a ClientSession instance (cached)
         """
         if self._session is None:
-            logger.info("Initializing %s" % self._session_cls.__name__)
+            logger.debug("Initializing %s" % self._session_cls.__name__)
             self._session = self._session_cls(**self._session_kws)
         return self._session
 
@@ -59,6 +59,8 @@ class Session(object):
         while attempts <= retries:
             try:
                 async with ratelimiter:
+
+                    logger.debug("%s %s" % (method, url))
                     async with self.session.request(method, url, **kwargs) as response:
 
                         # Emit an event with name corresponding to the final endpoint
@@ -108,8 +110,6 @@ class Session(object):
         limit = response[0].get("limit")
         offset = response[0].get("offset")
 
-        logger.debug("Count: %s, Limit: %s, Offset: %s" % (count, limit, offset))
-
         if any((count, limit, offset)):
 
             coros = list(map(
@@ -117,7 +117,11 @@ class Session(object):
                 range(limit + offset, count, limit)
             ))
 
-            logger.debug("Planning %s additional requests" % len(coros))
+            logger.debug(
+                "Planning %s additional requests (count: %d limit %d offset %d)"
+                % (len(coros), count, limit, offset)
+            )
+
             response.extend(await asyncio.gather(*coros))
 
         if jsonpath:
@@ -131,5 +135,7 @@ class Session(object):
         """
         Close the ClientSession
         """
+        logger.debug("Closing %s" % self._session_cls.__name__)
+
         await self.session.close()
         self._session = None
