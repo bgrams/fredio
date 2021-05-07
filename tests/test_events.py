@@ -39,13 +39,6 @@ class TestEvents(unittest.TestCase):
         self.assertIn(name, events._events.keys())
         self.assertIsInstance(events._events[name], events.Event)
 
-    def assertNumRunningTasks(self, num: int):
-
-        # Py36 doesn't seem to clean up cancelled tasks, so only filter for running
-        tasks = utils.get_all_tasks()
-        running = list(filter(lambda x: not x.done(), tasks))
-        self.assertEqual(len(running), num)
-
     def test_event_add(self):
         self.event.add(lambda x: x)
         self.assertEqual(len(self.event._handlers), 1)
@@ -87,18 +80,12 @@ class TestEvents(unittest.TestCase):
 
     def test_on_event_deco(self):
         events.on_event("foo")(lambda x: x)
-
         self.assertEvent("foo")
 
     def test_listen(self):
         self.assertFalse(events.running())
         self.assertTrue(events.listen())
         self.assertTrue(events.running())
-
-        # with self.assertRaises(TypeError):
-        #     events.register("foo", lambda x: x)
-
-        self.assertNumRunningTasks(1)
 
 
 if __name__ == "_main__":

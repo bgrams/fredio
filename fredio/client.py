@@ -1,135 +1,100 @@
-__all__ = ["ApiClient", "get_api_key", "get_client", "get_endpoints"]
+__all__ = ["ApiClient", "get_api_key", "get_client"]
 
 import asyncio
+import itertools
 import logging
 import os
-import urllib
 import webbrowser
-from typing import Any, Dict, List, Optional, Type
+from typing import Dict, List, Optional, TYPE_CHECKING
 
-from aiohttp.typedefs import StrOrURL
-from pandas import DataFrame
+from aiohttp import ClientSession, ClientResponse, ClientResponseError
+from jsonpath_rw import parse
 from yarl import URL
 
 from . import const
+from . import events
+from . import locks
 from . import utils
-from . import session
+
+if TYPE_CHECKING:
+    from pandas import DataFrame
+
 
 logger = logging.getLogger(__name__)
 
 
 class ApiClient(object):
     """
-    Structure containing a top level URL and child endpoints
+    Lazy sync wrapper around aiohttp.ClientSession, also containing
+    Endpoint objects that provide attribute access to URL subpaths.
     """
 
-    _children: Dict[str, "ApiClient"]  # TODO: get rid of mutability
-    _defaults: Dict[Any, Any] = dict()  # Default parameters for all client instances
-    _session: session.Session = None
-
-    def __init__(self, url: StrOrURL):
-        super(ApiClient, self).__init__()
-
-        self._children = dict()
-        self._url = URL(url, encoded=True)
-
-    def __getattribute__(self, item: Any) -> Any:
+    def __new__(cls, *args, **kwargs):
         """
-        Hijack to allow for accessing children using dot notation
+        Intercept to add Endpoint attributes to the instance at runtime
         """
-        try:
-            return super(ApiClient, self).__getattribute__(item)
-        except AttributeError:
-            children = super(ApiClient, self).__getattribute__("_children")
-            if item not in children.keys():
-                raise
-            return children[item]
 
-    def __repr__(self):  # pragma: no-cover
-        return f'{self.__class__.__name__}<{self._url}>'
+        instance = super().__new__(cls)
 
-    def _encode_url(self) -> URL:
-        """
-        Create new URL with default query parameters
-        """
-        # safe_chars is hard-coded as these chars are used for tag requests etc
-        query = urllib.parse.urlencode(self._defaults, safe=",;")
-        return self._url.with_query(query)
+        def setdefault(obj, key, value):
 
-    @classmethod
-    def set_defaults(cls, **params) -> Type["ApiClient"]:
-        """
-        Set default query parameters for all endpoints
+            if not hasattr(obj, key):
+                setattr(obj, key, value)
+                return value
+            else:
+                return getattr(obj, key)
 
-        :param params: Request parameters that will be passed for every request
-        for all ApiClient instances
-        """
-        cls._defaults = params
-        return cls
+        for ep in const.FRED_API_ENDPOINTS:
 
-    @classmethod
-    def set_session(cls, ses: session.Session) -> Type["ApiClient"]:
-        """
-        Set the Session for this class
+            iterobj = instance
+            for s in ep.split("/"):
+                iterobj = setdefault(iterobj, s, Endpoint(instance, ep))
 
-        :param ses: Session used by all ApiClient instances
-        """
-        cls._session = ses
-        return cls
+        return instance
 
-    @classmethod
-    def close_session(cls):
+    def __init__(self, api_key: str, **session_kws):
         """
-        Close the client session
+        :param api_key: FRED API key
+        :param session_kws: Keyword arguments passed to ClientSession
         """
-        if cls._session is not None:
-            coro = cls._session.close()
-            return utils.loop.run_until_complete(coro)
+
+        # Default HTTP parameters
+        defaults = {"api_key": api_key, "file_type": "json"}
+
+        self._defaults = frozenset(defaults.items())
+
+        # Lazy instantiation to be called within an async function
+        # ClientSession is cached
+        self._session_cls = ClientSession
+        self._session_kws = frozenset(session_kws.items())
+        self._session = None
 
     @property
-    def children(self) -> Dict[str, "ApiClient"]:
-        """
-        Get client children
-        """
-        return self._children
+    def defaults(self):
+        return self._defaults
 
     @property
-    def docs(self) -> "_ApiDocs":
-        return _ApiDocs(self._url)
+    def session(self) -> ClientSession:
+        self.start()
+        return self._session
 
-    @property
-    def url(self) -> URL:
+    def start(self) -> None:
         """
-        Encode this client's URL with query parameters
+        Initialize and cache the ClientSession instance
         """
-        return self._encode_url()
+        if self._session is None:
+            logger.debug("Initializing %s" % self._session_cls.__name__)
+            self._session = self._session_cls(**dict(self._session_kws))
 
-    def aget(self, **kwargs) -> asyncio.Task:
+    def close(self) -> None:
         """
-        Run an awaitable Task to get results from this endpoint
+        Close the ClientSession instance
+        """
+        if self._session is not None:
+            logger.debug("Closing %s" % self._session_cls.__name__)
+            utils.loop.run_until_complete(self._session.close())
 
-        :param kwargs: Keyword arguments passed to Session.get
-        """
-        coro = self._session.get(self.url, **kwargs)
-        task = utils.loop.create_task(coro)
-        return task
-
-    def get(self, **kwargs) -> List[Dict]:
-        """
-        Get request results as a list of JSON. This method is blocking.
-
-        :param kwargs: Keyword arguments passed to Session.get
-        """
-        task = self.aget(**kwargs)
-        return utils.loop.run_until_complete(task)
-
-    def get_pandas(self, **kwargs) -> DataFrame:
-        """
-        Get request results as a pandas DataFrame. This method is blocking.
-
-        :param kwargs: Keyword arguments passed to Session.get
-        """
-        return DataFrame.from_records(self.get(**kwargs))
+            self._session = None
 
 
 class _ApiDocs:
@@ -141,7 +106,7 @@ class _ApiDocs:
     def __init__(self, url):
         self.url = url
 
-    def make_url(self) -> URL:
+    def _make_url(self) -> URL:
         subpath = self.url.path.replace("/fred", "").lstrip("/").replace("/", "_")
 
         if subpath:
@@ -150,17 +115,86 @@ class _ApiDocs:
         return URL(const.FRED_DOC_URL) / subpath
 
     def open(self) -> bool:
-        return webbrowser.open(str(self.make_url()))
+        return webbrowser.open(str(self._make_url()))
 
     def open_new(self) -> bool:
-        return webbrowser.open_new(str(self.make_url()))
+        return webbrowser.open_new(str(self._make_url()))
 
     def open_new_tab(self) -> bool:
-        return webbrowser.open_new_tab(str(self.make_url()))
+        return webbrowser.open_new_tab(str(self._make_url()))
 
     open.__doc__ = webbrowser.open.__doc__
     open_new.__doc__ = webbrowser.open_new.__doc__
     open_new_tab.__doc__ = webbrowser.open_new_tab.__doc__
+
+
+class Endpoint(object):
+    """
+    Combines the high-level API client with endpoint URLs, URL encoding logic,
+    and getter methods.
+    """
+
+    base_url: URL = URL(const.FRED_API_URL, encoded=True)
+
+    def __init__(self, client: ApiClient, path: str):
+        self.client = client
+        self.path = path
+
+    @property
+    def docs(self) -> _ApiDocs:
+        return _ApiDocs(self.url)
+
+    @property
+    def url(self) -> URL:
+        """
+        Encode this client's URL with client default query parameters
+        """
+        suburl = self.base_url / self.path
+        return suburl.with_query(**dict(self.client.defaults))
+
+    async def aget(self, jsonpath: Optional[str] = None, retries: int = 3, **params) -> List[Dict]:
+        """
+        Get request results as a list of JSON
+
+        :param jsonpath: Optional jsonpath to query json results
+        :param retries: Number of request retries before raising an exeption. Currently only
+        applies to ClientResponseError with code 429.
+        :param params: HTTP request parameters
+        """
+
+        url = self.url.update_query(params)
+        res = await get(self.client.session, url, retries)
+
+        if jsonpath:
+
+            parsed = parse(jsonpath)
+            mapped = map(lambda x: [i.value for i in parsed.find(x)], res)
+            return list(itertools.chain.from_iterable(mapped))
+        return res
+
+    def get(self, **kwargs) -> List[Dict]:
+        """
+        Get request results as a list of JSON
+
+        :param jsonpath: Optional jsonpath to query json results
+        :param retries: Number of request retries before raising an exeption. Currently only
+        applies to ClientResponseError with code 429.
+        :param params: HTTP request parameters
+        """
+        return utils.loop.run_until_complete(self.aget(**kwargs))
+
+    def get_pandas(self, **kwargs) -> "DataFrame":
+        """
+        Get request results as a pandas DataFrame
+
+        :param jsonpath: Optional jsonpath to query json results
+        :param retries: Number of request retries before raising an exeption. Currently only
+        applies to ClientResponseError with code 429.
+        :param params: HTTP request parameters
+        """
+        from pandas import DataFrame
+
+        return DataFrame.from_records(self.get(**kwargs))
 
 
 def get_api_key() -> Optional[str]:
@@ -170,40 +204,105 @@ def get_api_key() -> Optional[str]:
     return os.environ.get("FRED_API_KEY", None)
 
 
-def get_client() -> ApiClient:
+def get_client(api_key: Optional[str] = None, **session_kws) -> ApiClient:
     """
-    Construct an ApiClient and add FRED endpoints.
+    Wrapper around ApiClient constructor
+
+    :param api_key: Optional FRED API key. Retrieved from env FRED_API_KEY if not set.
+    :param session_kws: Keyword arguments passed to the ClientSession constructor.
+    """
+    api_key = api_key or get_api_key()
+
+    if api_key is None:
+        msg = "Api key must be provided or passed as environment variable FRED_API_KEY"
+        raise ValueError(msg)
+
+    return ApiClient(api_key=api_key, **session_kws)
+
+
+async def request(session: ClientSession,
+                  method: str,
+                  url: URL,
+                  retries: int = 0) -> ClientResponse:
+    """
+    Wraps ClientSession.request() with rate limiting and handles retry logic
+
+    :param session: ClientSession instance
+    :param method: Request method
+    :param url: URL
+    :param retries: Maximum number of request retries
+    """
+    ratelimiter = locks.get_rate_limiter()
+
+    attempts = 0
+    while attempts <= retries:
+        try:
+            async with ratelimiter:
+
+                logger.debug("%s %s" % (method, url))
+                async with session.request(method, url, raise_for_status=True) as response:
+
+                    # Read response data from the open connection before emitting an event
+                    # This can cause a race condition on the response buffer (or something)
+                    await response.json()
+
+                    # Emit a response event with name corresponding to the final endpoint
+                    if events.running():
+                        name = response.url.path.split("/")[-1]
+                        await events.produce(name, response)
+
+                    return response
+
+        except ClientResponseError as e:
+            attempts += 1
+            logging.error(e)
+
+            if e.status == 429 and attempts <= retries:
+                backoff = ratelimiter.get_backoff()
+                logger.debug("Retrying request in %d seconds" % backoff)
+                await asyncio.sleep(backoff)
+            else:
+                raise
+
+
+async def get(session: ClientSession, url: URL, retries: int = 0) -> List[Dict]:
+    """
+    Will await a single request to get the first batch of data before executing
+    subsequent requests (if required) according to offset logic. Jsonpath query
+    is optionally executed on json response data from each request.
+
+    :param session: ClientSession instance
+    :param url: URL
+    :param retries: Retry count, passed to Session.request
     """
 
-    client = ApiClient(const.FRED_API_URL)
-    add_endpoints(client, *const.FRED_API_ENDPOINTS)
+    # Helper
+    async def json(_url):
+        response = await request(
+            url=_url,
+            session=session,
+            method="GET",
+            retries=retries
+        )
+        return await response.json()
 
-    return client
+    results = [await json(url)]
 
+    count = results[0].get("count")
+    limit = results[0].get("limit")
+    offset = results[0].get("offset", 0)
 
-def add_endpoints(client: ApiClient, *endpoints) -> None:
-    """
-    Add an endpoint to the client instance
+    if count or limit:
+        coros = list(map(
+            lambda x: json(url.update_query(offset=x)),
+            range(limit + offset, count, limit)
+        ))
 
-    :param client: ApiClient
-    :param endpoints: URL subpaths to add to the ApiClient structure
-    """
-    for ep in endpoints:
-        parent, *child = ep.split("/", 1)
-        newpath = client.children.setdefault(parent, ApiClient(client.url / parent))
-        if len(child):
-            add_endpoints(newpath, child[0])
+        logger.debug(
+            "Planning %s additional requests (count: %d limit %d offset %d)"
+            % (len(coros), count, limit, offset)
+        )
 
+        results.extend(await asyncio.gather(*coros))
 
-def get_endpoints(client: ApiClient) -> List[URL]:
-    """
-    Get all registered URLs from an ApiClient
-
-    :param client: ApiClient
-    """
-    endpoints = []
-    for node in client.children.values():
-        if isinstance(node, ApiClient):
-            endpoints.extend(get_endpoints(node))
-    endpoints.append(client.url)
-    return endpoints
+    return results

@@ -3,7 +3,7 @@ __all__ = ["configure", "shutdown", "client", "events"]
 import atexit
 from typing import Optional
 
-from . import client, events, locks, session, utils
+from . import client, events, locks, utils
 
 
 def configure(api_key: Optional[str] = None,
@@ -20,17 +20,7 @@ def configure(api_key: Optional[str] = None,
     :param session_kwargs: Keyword arguments passed to aiohttp.ClientSession
     """
 
-    api_key = api_key or client.get_api_key()
-
-    if api_key is None:
-        msg = "Api key must be provided or passed as environment variable FRED_API_KEY"
-        raise ValueError(msg)
-
-    ses = session.Session(**session_kwargs)
-
-    client_ = client.get_client()
-    client_.set_session(ses)
-    client_.set_defaults(api_key=api_key, file_type="json")
+    client_ = client.get_client(api_key, **session_kwargs)
 
     if rate_limit is not None:
         locks.set_rate_limit(rate_limit)
@@ -55,9 +45,6 @@ def shutdown():
 
     # Cancel other tasks (ratelimiter & others)
     locks.get_rate_limiter().stop()
-
-    # Close aiohttp session
-    client.ApiClient.close_session()
 
 
 atexit.register(shutdown)
