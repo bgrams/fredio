@@ -1,15 +1,48 @@
 __all__ = ["get_rate_limiter", "set_rate_limit"]
 
+import abc
 import asyncio
 import logging
 import math
 import time
 from collections import deque
+from typing import Type
 
 from . import const
 from . import utils
 
 logger = logging.getLogger(__name__)
+
+
+class Timer(abc.ABC):
+    """
+    Abstract timer class
+    """
+    @abc.abstractmethod
+    def time(self) -> float: ...  # pragma: no cover
+
+
+class SystemTimer(Timer):
+    """
+    System timer. Wraps time.time()
+    """
+    def time(self):
+        return time.time()
+
+
+class MonotonicTimer(Timer):
+    """
+    Monotonic timer.
+
+    Wraps time.monotonic(), but with a time offset defined on instantiation.
+    This offset is used to define a point of reference such that it behaves
+    similarly to system time but is not affected by clock synchronization.
+    """
+    def __init__(self):
+        self._deltat = time.time() - time.monotonic()
+
+    def time(self):
+        return time.monotonic() + self._deltat
 
 
 class RateLimiter(asyncio.BoundedSemaphore):
@@ -26,23 +59,15 @@ class RateLimiter(asyncio.BoundedSemaphore):
                  limit: int = const.FRED_API_RATE_LIMIT,
                  period: int = const.FRED_API_RATE_RESET,
                  *,
+                 timer: Type[Timer] = MonotonicTimer,
                  loop: asyncio.BaseEventLoop = utils.loop):
 
         super(RateLimiter, self).__init__(limit, loop=loop)
 
-        # Store the delta between monotonic and system time to define
-        # a point of reference
-        self._deltat = time.time() - self._loop.time()
-
         self._period = period
         self._releases = deque()
         self._task = None
-
-    def _timer(self) -> float:
-        """
-        Monotonic time synced with the system
-        """
-        return self._loop.time() + self._deltat
+        self._timer = timer()
 
     @property
     def started(self) -> bool:
@@ -54,7 +79,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
 
         :param ceil: Round backoff time up to the closest integer
         """
-        backoff = self._period - self._timer() % self._period
+        backoff = self._period - self._timer.time() % self._period
 
         if ceil:
             return float(math.ceil(backoff))
@@ -64,7 +89,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
         """
         Get number of periods since timer start
         """
-        return int(self._timer() // self._period)
+        return int(self._timer.time() // self._period)
 
     def start(self) -> bool:
         """
@@ -104,13 +129,13 @@ class RateLimiter(asyncio.BoundedSemaphore):
 
                 # Peek and compare counters
                 # A lock will only be released if scheduled from a previous count
-                if self._releases[0][1] <= self.get_counter():
+                if self._releases[0][1] < self.get_counter():
 
                     ts, ct = self._releases.popleft()
                     super(RateLimiter, self).release()
 
                     logger.debug("Released lock from counter %d (elapsed: %.4f)"
-                                 % (ct, self._timer() - ts))
+                                 % (ct, self._timer.time() - ts))
                 else:
                     break
 
@@ -121,7 +146,7 @@ class RateLimiter(asyncio.BoundedSemaphore):
         """
         Schedule a lock to be released in the next counter
         """
-        self._releases.append((self._timer(), self.get_counter()))
+        self._releases.append((self._timer.time(), self.get_counter()))
 
 
 _ratelimiter = RateLimiter()
@@ -134,11 +159,13 @@ def get_rate_limiter() -> RateLimiter:
     return _ratelimiter
 
 
-def set_rate_limit(limit: int = const.FRED_API_RATE_LIMIT) -> bool:
+def set_rate_limit(limit: int = const.FRED_API_RATE_LIMIT,
+                   timer: Type[Timer] = MonotonicTimer) -> bool:
     """
     Reset the global ratelimiter with a new limit.
 
     :param limit: Number of requests per minute. Should be < 120
+    :param timer: Timer implementation
     """
     if limit > const.FRED_API_RATE_LIMIT:
         raise ValueError("Limit must be <= %d" % const.FRED_API_RATE_LIMIT)
@@ -146,7 +173,7 @@ def set_rate_limit(limit: int = const.FRED_API_RATE_LIMIT) -> bool:
     global _ratelimiter
 
     _ratelimiter.stop()
-    _ratelimiter = RateLimiter(limit)
+    _ratelimiter = RateLimiter(limit, timer=timer)
     _ratelimiter.start()
 
     return True

@@ -1,11 +1,14 @@
 import asyncio
 import unittest
+from typing import Type
 
 from fredio import locks
 from fredio import utils
 
 
-class TestDefaultRateLimiting(unittest.TestCase):
+class _TestBase:
+
+    timer_t: Type[locks.Timer]
 
     period = 0.25
     rate = 2
@@ -15,7 +18,7 @@ class TestDefaultRateLimiting(unittest.TestCase):
         cls.loop = utils.loop
 
     def setUp(self):
-        self.ratelimiter = locks.RateLimiter(self.rate, self.period)
+        self.ratelimiter = locks.RateLimiter(self.rate, self.period, timer=self.timer_t)
         self.ratelimiter.start()
 
     def tearDown(self):
@@ -34,7 +37,7 @@ class TestDefaultRateLimiting(unittest.TestCase):
         self.assertAlmostEqual(backoff, 1)
 
     def test_get_rate_limiter_counter(self):
-        timestamp = self.ratelimiter._timer()
+        timestamp = self.ratelimiter._timer.time()
         counter = self.ratelimiter.get_counter() * self.period
         self.assertAlmostEqual(int(counter), int(timestamp))
 
@@ -54,9 +57,17 @@ class TestDefaultRateLimiting(unittest.TestCase):
 
     def test_ratelimiter_get_set(self):
         rl1 = locks.get_rate_limiter()
-        locks.set_rate_limit(100)
+        locks.set_rate_limit(100, timer=self.timer_t)
         rl2 = locks.get_rate_limiter()
         self.assertIsNot(rl1, rl2)
+
+
+class TestSystemRateLimiting(_TestBase, unittest.TestCase):
+    timer_t = locks.SystemTimer
+
+
+class TestMonotonicRateLimiting(_TestBase, unittest.TestCase):
+    timer_t = locks.MonotonicTimer
 
 
 if __name__ == "__main__":

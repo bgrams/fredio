@@ -84,7 +84,7 @@ class ApiClient(object):
         """
         if self._session is None:
             logger.debug("Initializing %s" % self._session_cls.__name__)
-            self._session = self._session_cls(**dict(self._session_kws))
+            self._session = self._session_cls(**dict(self._session_kws))  # type: ignore
 
     def close(self) -> None:
         """
@@ -150,7 +150,7 @@ class Endpoint(object):
         Encode this client's URL with client default query parameters
         """
         suburl = self.base_url / self.path
-        return suburl.with_query(**dict(self.client.defaults))
+        return suburl.with_query(**dict(self.client.defaults))  # type: ignore
 
     async def aget(self, jsonpath: Optional[str] = None, retries: int = 3, **params) -> List[Dict]:
         """
@@ -244,7 +244,7 @@ async def request(session: ClientSession,
 
                     # Read response data from the open connection before emitting an event
                     # This can cause a race condition on the response buffer (or something)
-                    await response.json()
+                    await response.read()
 
                     # Emit a response event with name corresponding to the final endpoint
                     if events.running():

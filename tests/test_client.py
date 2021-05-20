@@ -35,13 +35,16 @@ def mock_fred_response(method: str,
     )
 
     body = '{"count": %d, "limit": %d, "offset": %d}' % (count, limit, offset)
+    response._body = body.encode("utf-8")
 
     reader = asyncio.Future()
-    reader.set_result(body.encode("utf-8"))
+    reader.set_result(response._body)  # noqa
 
     response.content = MagicMock()
     response.content.read = MagicMock()
     response.content.read.return_value = reader
+    response.read = MagicMock()
+    response.read.return_value = reader
 
     response._headers = {"Content-Type": "application/json"}
 
