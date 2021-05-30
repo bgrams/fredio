@@ -12,8 +12,8 @@ from pandas import DataFrame
 from yarl import URL
 
 from fredio import configure
-from fredio import const, locks, utils
-from fredio.client import ApiClient, Endpoint, get_client, request  # noqa
+from fredio import const, utils
+from fredio.client import ApiClient, Endpoint, get_client  # noqa
 
 
 def mock_fred_response(method: str,
@@ -75,19 +75,13 @@ class TestApiClient(unittest.TestCase):
 
     client: ApiClient
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.client = configure(api_key="foo")
-        cls.endpoint = Endpoint(client=cls.client, path="")
-        cls.request_url = URL("https://api.stlouisfed.org/fred/?file_type=json&api_key=foo")
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.client.close()
+    def setUp(self) -> None:
+        self.client = configure(api_key="foo")
+        self.endpoint = Endpoint(client=self.client, path="")
+        self.request_url = URL("https://api.stlouisfed.org/fred/?file_type=json&api_key=foo")
 
     def tearDown(self) -> None:
-        """Reset the rate limiter for each test"""
-        locks.set_rate_limit()
+        self.client.close()
 
     def patchedRequest(self,
                        method: str = "GET",
@@ -108,13 +102,12 @@ class TestApiClient(unittest.TestCase):
     @async_test
     async def test_request(self):
 
-        ratelim = locks.get_rate_limiter()
+        ratelim = self.client.ratelimiter
 
         with self.patchedRequest() as req:
-            rate_value = ratelim._value
-            await request(self.client.session, "GET", self.request_url)
+            await self.client.request("GET", self.request_url)
 
-            self.assertEqual(ratelim._value, rate_value - 1)
+            self.assertEqual(ratelim._value, ratelim._bound_value - 1)
             self.assertEqual(len(ratelim._releases), 1)
 
             req.assert_called_once()
@@ -128,13 +121,13 @@ class TestApiClient(unittest.TestCase):
         with patch("asyncio.sleep", return_value=sleeper):
             with self.patchedRequest(status=429) as req:
                 with self.assertRaises(ClientResponseError):
-                    await request(self.client.session, "GET", self.request_url, retries=2)
+                    await self.client.request("GET", self.request_url, retries=2)
 
                 self.assertEqual(3, req.call_count)
 
             with self.patchedRequest(status=400) as req:
                 with self.assertRaises(ClientResponseError):
-                    await request(self.client.session, "GET", self.request_url, retries=2)
+                    await self.client.request("GET", self.request_url, retries=2)
 
             self.assertEqual(1, req.call_count)
 

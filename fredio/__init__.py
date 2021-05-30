@@ -23,7 +23,7 @@ def configure(api_key: Optional[str] = None,
     client_ = client.get_client(api_key, **session_kwargs)
 
     if rate_limit is not None:
-        locks.set_rate_limit(rate_limit)
+        client_.set_rate_limit(rate_limit)
 
     if enable_events:
         events.listen()
@@ -33,18 +33,10 @@ def configure(api_key: Optional[str] = None,
 
 def shutdown():
     """
-    Shutdown this fredio appilication. In order:
-    1. Cancel events consumer
-       - This will block until all Tasks spawned by the consumer process
-         have completed
-    2. Stop the rate limiter
-    3. Close the aiohttp client session
+    Shutdown events consumer on exit
     """
     # Flush all events and cancel
     utils.loop.run_until_complete(events.cancel())
-
-    # Cancel other tasks (ratelimiter & others)
-    locks.get_rate_limiter().stop()
 
 
 atexit.register(shutdown)

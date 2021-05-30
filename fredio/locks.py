@@ -1,4 +1,4 @@
-__all__ = ["get_rate_limiter", "set_rate_limit"]
+__all__ = ["RateLimiter"]
 
 import abc
 import asyncio
@@ -110,6 +110,12 @@ class RateLimiter(asyncio.BoundedSemaphore):
         if self.started:
             self._task.cancel()
             self._task = None
+            for waiter in self._waiters:
+                waiter.cancel()
+            while self._releases:
+                self._releases.popleft()
+            self._value = self._bound_value
+
         return True
 
     async def replenish(self) -> None:
@@ -143,33 +149,3 @@ class RateLimiter(asyncio.BoundedSemaphore):
         Schedule a lock to be released in the next counter
         """
         self._releases.append((self._timer.time(), self.get_counter()))
-
-
-_ratelimiter = RateLimiter()
-
-
-def get_rate_limiter() -> RateLimiter:
-    """
-    Get the global ratelimiter
-    """
-    return _ratelimiter
-
-
-def set_rate_limit(limit: int = const.FRED_API_RATE_LIMIT,
-                   timer: Type[Timer] = MonotonicTimer) -> bool:
-    """
-    Reset the global ratelimiter with a new limit.
-
-    :param limit: Number of requests per minute. Should be < 120
-    :param timer: Timer implementation
-    """
-    if limit > const.FRED_API_RATE_LIMIT:
-        raise ValueError("Limit must be <= %d" % const.FRED_API_RATE_LIMIT)
-
-    global _ratelimiter
-
-    _ratelimiter.stop()
-    _ratelimiter = RateLimiter(limit, timer=timer)
-    _ratelimiter.start()
-
-    return True

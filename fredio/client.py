@@ -28,6 +28,7 @@ class ApiClient(object):
     Lazy sync wrapper around aiohttp.ClientSession, also containing
     Endpoint objects that provide attribute access to URL subpaths.
     """
+    ratelimiter: locks.RateLimiter = locks.RateLimiter()
 
     def __new__(cls, *args, **kwargs):
         """
@@ -78,6 +79,11 @@ class ApiClient(object):
         self.start()
         return self._session
 
+    @classmethod
+    def set_rate_limit(cls, limit: int = const.FRED_API_RATE_LIMIT):
+        cls.ratelimiter.stop()
+        cls.ratelimiter = locks.RateLimiter(limit=limit)
+
     def start(self) -> None:
         """
         Initialize and cache the ClientSession instance
@@ -85,6 +91,8 @@ class ApiClient(object):
         if self._session is None:
             logger.debug("Initializing %s" % self._session_cls.__name__)
             self._session = self._session_cls(**dict(self._session_kws))  # type: ignore
+
+        self.ratelimiter.start()
 
     def close(self) -> None:
         """
@@ -95,6 +103,96 @@ class ApiClient(object):
             utils.loop.run_until_complete(self._session.close())
 
             self._session = None
+
+        self.ratelimiter.stop()
+
+    async def _handle_exception(self, response: ClientResponse, exc: ClientResponseError) -> None:
+        if exc.status == 429:
+            hdr_time = datetime.strptime(
+                response.headers["Date"],
+                "%a, %d %b %Y %H:%M:%S GMT"
+            )
+
+            backoff = self.ratelimiter.get_backoff(reltime=hdr_time.timestamp())
+
+            logger.debug("Retrying request in %.2f seconds" % backoff)
+            await asyncio.sleep(backoff)
+        else:
+            raise exc
+
+    async def request(self,
+                      method: str,
+                      url: URL,
+                      retries: int = 0) -> ClientResponse:
+        """
+        Wraps ClientSession.request() with rate limiting and handles retry logic
+
+        :param method: Request method
+        :param url: URL
+        :param retries: Maximum number of request retries
+        """
+
+        while retries >= 0:
+            async with self.ratelimiter:
+                async with self.session.request(method, url) as response:
+                    logger.debug("%s %s" % (method, url))
+                    try:
+                        response.raise_for_status()
+
+                        # Read response data from the open connection before emitting an event
+                        # This can cause a race condition on the response buffer (or something)
+                        await response.read()
+
+                        # Emit a response event with name corresponding to the final endpoint
+                        if events.running():
+                            name = response.url.path.split("/")[-1]
+                            await events.produce(name, response)
+
+                        return response
+
+                    except ClientResponseError as e:
+                        logging.error(e)
+                        retries -= 1
+                        if retries >= 0:
+                            await self._handle_exception(response, e)
+                        else:
+                            raise
+
+    async def get(self, url: URL, retries: int = 0) -> List[Dict]:
+        """
+        Will await a single request to get the first batch of data before executing
+        subsequent requests (if required) according to offset logic. Jsonpath query
+        is optionally executed on json response data from each request.
+
+        :param url: URL
+        :param retries: Retry count, passed to Session.request
+        """
+
+        # Helper
+        async def json(_url):
+            response = await self.request(url=_url, method="GET", retries=retries)
+            return await response.json()
+
+        results = [await json(url)]
+
+        count = results[0].get("count")
+        limit = results[0].get("limit")
+        offset = results[0].get("offset", 0)
+
+        if count or limit:
+            coros = list(map(
+                lambda x: json(url.update_query(offset=x)),
+                range(limit + offset, count, limit)
+            ))
+
+            logger.debug(
+                "Planning %s additional requests (count: %d limit %d offset %d)"
+                % (len(coros), count, limit, offset)
+            )
+
+            results.extend(await asyncio.gather(*coros))
+
+        return results
 
 
 class _ApiDocs:
@@ -167,7 +265,7 @@ class Endpoint(object):
         """
 
         url = self.url.update_query(params)
-        res = await get(self.client.session, url, retries)
+        res = await self.client.get(url, retries)
 
         if jsonpath:
             mapped = map(engine.compile(jsonpath).execute, res)
@@ -206,97 +304,3 @@ def get_client(api_key: Optional[str] = None, **session_kws) -> ApiClient:
         raise ValueError(msg)
 
     return ApiClient(api_key=api_key, **session_kws)
-
-
-async def request(session: ClientSession,
-                  method: str,
-                  url: URL,
-                  retries: int = 0) -> ClientResponse:
-    """
-    Wraps ClientSession.request() with rate limiting and handles retry logic
-
-    :param session: ClientSession instance
-    :param method: Request method
-    :param url: URL
-    :param retries: Maximum number of request retries
-    """
-    ratelimiter = locks.get_rate_limiter()
-
-    while retries >= 0:
-        async with ratelimiter:
-            async with session.request(method, url) as response:
-                logger.debug("%s %s" % (method, url))
-                try:
-                    response.raise_for_status()
-
-                    # Read response data from the open connection before emitting an event
-                    # This can cause a race condition on the response buffer (or something)
-                    await response.read()
-
-                    # Emit a response event with name corresponding to the final endpoint
-                    if events.running():
-                        name = response.url.path.split("/")[-1]
-                        await events.produce(name, response)
-
-                    return response
-
-                except ClientResponseError as e:
-                    logging.error(e)
-
-                    if e.status == 429 and retries > 0:
-                        hdr_time = datetime.strptime(
-                            response.headers["Date"],
-                            "%a, %d %b %Y %H:%M:%S GMT"
-                        )
-
-                        backoff = ratelimiter.get_backoff(reltime=hdr_time.timestamp())
-
-                        logger.debug("Retrying request in %.2f seconds" % backoff)
-                        await asyncio.sleep(backoff)
-                    else:
-                        raise
-                finally:
-                    retries -= 1
-
-
-async def get(session: ClientSession, url: URL, retries: int = 0) -> List[Dict]:
-    """
-    Will await a single request to get the first batch of data before executing
-    subsequent requests (if required) according to offset logic. Jsonpath query
-    is optionally executed on json response data from each request.
-
-    :param session: ClientSession instance
-    :param url: URL
-    :param retries: Retry count, passed to Session.request
-    """
-
-    # Helper
-    async def json(_url):
-        response = await request(
-            url=_url,
-            session=session,
-            method="GET",
-            retries=retries
-        )
-        return await response.json()
-
-    results = [await json(url)]
-
-    count = results[0].get("count")
-    limit = results[0].get("limit")
-    offset = results[0].get("offset", 0)
-
-    if count or limit:
-        coros = list(map(
-            lambda x: json(url.update_query(offset=x)),
-            range(limit + offset, count, limit)
-        ))
-
-        logger.debug(
-            "Planning %s additional requests (count: %d limit %d offset %d)"
-            % (len(coros), count, limit, offset)
-        )
-
-        results.extend(await asyncio.gather(*coros))
-
-    return results

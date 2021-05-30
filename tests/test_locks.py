@@ -55,12 +55,6 @@ class _TestBase:
 
         self.loop.run_until_complete(acquire_release())
 
-    def test_ratelimiter_get_set(self):
-        rl1 = locks.get_rate_limiter()
-        locks.set_rate_limit(100, timer=self.timer_t)
-        rl2 = locks.get_rate_limiter()
-        self.assertIsNot(rl1, rl2)
-
 
 class TestSystemRateLimiting(_TestBase, unittest.TestCase):
     timer_t = locks.SystemTimer
