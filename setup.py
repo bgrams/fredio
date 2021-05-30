@@ -9,7 +9,7 @@ with open(os.path.join(dirname, "README.md"), "r") as f:
 
 setup(
     name="fredio",
-    version="0.1.1",
+    version="0.1.2",
     description="Asynchronous python client for the FRED® API",
     long_description=long_description,
     long_description_content_type="text/markdown",
