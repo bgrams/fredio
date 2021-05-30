@@ -1,0 +1,10 @@
+[report]
+exclude_lines =
+    # Reenable
+    pragma: no-cover
+
+    # Ignore abstract methods
+    abstractmethod
+
+    # Ignore repr's
+    def __repr__

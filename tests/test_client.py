@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import inspect
 import sys
 import unittest
@@ -7,7 +8,6 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from aiohttp import ClientResponse, ClientResponseError
-from aiohttp.helpers import TimerNoop  # noqa
 from pandas import DataFrame
 from yarl import URL
 
@@ -18,6 +18,7 @@ from fredio.client import ApiClient, Endpoint, get_client, request  # noqa
 
 def mock_fred_response(method: str,
                        url: URL,
+                       status: int = 200,
                        count: int = 0,
                        limit: int = 0,
                        offset: int = 0):
@@ -29,13 +30,15 @@ def mock_fred_response(method: str,
         continue100=None,
         writer=MagicMock(),
         session=MagicMock(),
-        timer=TimerNoop(),
+        timer=MagicMock(),
         traces=[],
         loop=utils.loop
     )
 
     body = '{"count": %d, "limit": %d, "offset": %d}' % (count, limit, offset)
     response._body = body.encode("utf-8")
+
+    response.status = status
 
     reader = asyncio.Future()
     reader.set_result(response._body)  # noqa
@@ -46,7 +49,12 @@ def mock_fred_response(method: str,
     response.read = MagicMock()
     response.read.return_value = reader
 
-    response._headers = {"Content-Type": "application/json"}
+    response.reason = "Good"
+
+    response._headers = {
+        "Content-Type": "application/json",
+        "Date": datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
+    }
 
     # Why
     if sys.version_info < (3, 8):
@@ -59,8 +67,7 @@ def mock_fred_response(method: str,
 
 def async_test(fn):
     def tester(*args, **kwargs):
-        coro = fn(*args, **kwargs)
-        utils.loop.run_until_complete(coro)
+        utils.loop.run_until_complete(fn(*args, **kwargs))
     return tester
 
 
@@ -85,11 +92,12 @@ class TestApiClient(unittest.TestCase):
     def patchedRequest(self,
                        method: str = "GET",
                        url: Union[str, URL] = None,
+                       status: int = 200,
                        return_value: Any = None,
                        **kwargs):
 
         if return_value is None:
-            return_value = mock_fred_response(method, url or self.request_url)
+            return_value = mock_fred_response(method, url or self.request_url, status)
 
         return patch(
             "aiohttp.ClientSession._request",
@@ -114,24 +122,24 @@ class TestApiClient(unittest.TestCase):
     @async_test
     async def test_request_retries(self):
 
-        error400 = ClientResponseError(request_info=MagicMock(), history=MagicMock())
-        error429 = ClientResponseError(request_info=MagicMock(), history=MagicMock())
+        sleeper = asyncio.ensure_future(asyncio.sleep(0))
 
-        error400.status = 400
-        error429.status = 429
-
-        with patch.object(locks.RateLimiter, "get_backoff", return_value=0):
-            with self.patchedRequest(side_effect=error429) as req:
+        # We don't need to actually sleep for anything in this test
+        with patch("asyncio.sleep", return_value=sleeper):
+            with self.patchedRequest(status=429) as req:
                 with self.assertRaises(ClientResponseError):
                     await request(self.client.session, "GET", self.request_url, retries=2)
 
                 self.assertEqual(3, req.call_count)
 
-            with self.patchedRequest(side_effect=error400) as req:
+            with self.patchedRequest(status=400) as req:
                 with self.assertRaises(ClientResponseError):
                     await request(self.client.session, "GET", self.request_url, retries=2)
 
-                self.assertEqual(1, req.call_count)
+            self.assertEqual(1, req.call_count)
+
+        # JIC
+        await sleeper
 
     @async_test
     async def test_get(self):

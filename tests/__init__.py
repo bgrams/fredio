@@ -1,7 +1,7 @@
 import logging
 import os
 
-loglevel = os.environ.get("FREDIO_TESTING_LOG_LEVEL", "ERROR")
+loglevel = os.environ.get("FREDIO_TESTING_LOG_LEVEL", "CRITICAL")
 
 logging.basicConfig(
     level=logging.getLevelName(loglevel.upper()),

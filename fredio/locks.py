@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from collections import deque
-from typing import Type
+from typing import Optional, Type
 
 from . import const
 from . import utils
@@ -19,7 +19,7 @@ class Timer(abc.ABC):
     Abstract timer class
     """
     @abc.abstractmethod
-    def time(self) -> float: ...  # pragma: no cover
+    def time(self) -> float: ...
 
 
 class SystemTimer(Timer):
@@ -69,17 +69,21 @@ class RateLimiter(asyncio.BoundedSemaphore):
         self._task = None
         self._timer = timer()
 
+        self.start()
+
     @property
     def started(self) -> bool:
         return self._task is not None
 
-    def get_backoff(self, ceil: bool = True) -> float:
+    def get_backoff(self, ceil: bool = True, reltime: Optional[float] = None) -> float:
         """
         Get number of seconds until the next count
 
-        :param ceil: Round backoff time up to the closest integer
+        :param ceil: Round backoff time up to the closest second
+        :param reltime: Relative time
         """
-        backoff = self._period - self._timer.time() % self._period
+        reltime = reltime or self._timer.time()
+        backoff = self._period - reltime % self._period
 
         if ceil:
             return float(math.ceil(backoff))
@@ -107,14 +111,6 @@ class RateLimiter(asyncio.BoundedSemaphore):
             self._task.cancel()
             self._task = None
         return True
-
-    async def acquire(self) -> bool:
-        """
-        Acquire a lock
-        """
-        self.start()
-
-        return await super(RateLimiter, self).acquire()
 
     async def replenish(self) -> None:
         """

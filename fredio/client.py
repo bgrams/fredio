@@ -5,10 +5,10 @@ import itertools
 import logging
 import os
 import webbrowser
+from datetime import datetime
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from aiohttp import ClientSession, ClientResponse, ClientResponseError
-from jsonpath_rw import parse
 from yarl import URL
 
 from . import const
@@ -152,13 +152,17 @@ class Endpoint(object):
         suburl = self.base_url / self.path
         return suburl.with_query(**dict(self.client.defaults))  # type: ignore
 
-    async def aget(self, jsonpath: Optional[str] = None, retries: int = 3, **params) -> List[Dict]:
-        """
-        Get request results as a list of JSON
+    async def aget(self,
+                   jsonpath: Optional[str] = None,
+                   retries: int = 3,
+                   engine: utils.AbstractQueryEngine = utils.JsonpathEngine(),
+                   **params) -> utils.JSON_T:
+        """Get request results as a list of JSON
 
         :param jsonpath: Optional jsonpath to query json results
         :param retries: Number of request retries before raising an exeption. Currently only
-        applies to ClientResponseError with code 429.
+        applies to ClientResponseError with status 429.
+        :param engine: Query engine used to execute jsonpath query
         :param params: HTTP request parameters
         """
 
@@ -166,32 +170,16 @@ class Endpoint(object):
         res = await get(self.client.session, url, retries)
 
         if jsonpath:
-
-            parsed = parse(jsonpath)
-            mapped = map(lambda x: [i.value for i in parsed.find(x)], res)
+            mapped = map(engine.compile(jsonpath).execute, res)
             return list(itertools.chain.from_iterable(mapped))
         return res
 
-    def get(self, **kwargs) -> List[Dict]:
-        """
-        Get request results as a list of JSON
-
-        :param jsonpath: Optional jsonpath to query json results
-        :param retries: Number of request retries before raising an exeption. Currently only
-        applies to ClientResponseError with code 429.
-        :param params: HTTP request parameters
-        """
+    @utils.sharedoc(aget)
+    def get(self, **kwargs) -> utils.JSON_T:
         return utils.loop.run_until_complete(self.aget(**kwargs))
 
+    @utils.sharedoc(aget, short="Get request results as a pandas DataFrame\n")
     def get_pandas(self, **kwargs) -> "DataFrame":
-        """
-        Get request results as a pandas DataFrame
-
-        :param jsonpath: Optional jsonpath to query json results
-        :param retries: Number of request retries before raising an exeption. Currently only
-        applies to ClientResponseError with code 429.
-        :param params: HTTP request parameters
-        """
         from pandas import DataFrame
 
         return DataFrame.from_records(self.get(**kwargs))
@@ -234,13 +222,12 @@ async def request(session: ClientSession,
     """
     ratelimiter = locks.get_rate_limiter()
 
-    attempts = 0
-    while attempts <= retries:
-        try:
-            async with ratelimiter:
-
+    while retries >= 0:
+        async with ratelimiter:
+            async with session.request(method, url) as response:
                 logger.debug("%s %s" % (method, url))
-                async with session.request(method, url, raise_for_status=True) as response:
+                try:
+                    response.raise_for_status()
 
                     # Read response data from the open connection before emitting an event
                     # This can cause a race condition on the response buffer (or something)
@@ -253,16 +240,23 @@ async def request(session: ClientSession,
 
                     return response
 
-        except ClientResponseError as e:
-            attempts += 1
-            logging.error(e)
+                except ClientResponseError as e:
+                    logging.error(e)
 
-            if e.status == 429 and attempts <= retries:
-                backoff = ratelimiter.get_backoff()
-                logger.debug("Retrying request in %d seconds" % backoff)
-                await asyncio.sleep(backoff)
-            else:
-                raise
+                    if e.status == 429 and retries > 0:
+                        hdr_time = datetime.strptime(
+                            response.headers["Date"],
+                            "%a, %d %b %Y %H:%M:%S GMT"
+                        )
+
+                        backoff = ratelimiter.get_backoff(reltime=hdr_time.timestamp())
+
+                        logger.debug("Retrying request in %.2f seconds" % backoff)
+                        await asyncio.sleep(backoff)
+                    else:
+                        raise
+                finally:
+                    retries -= 1
 
 
 async def get(session: ClientSession, url: URL, retries: int = 0) -> List[Dict]:
