@@ -90,7 +90,7 @@ class RateLimiter(object):
             self._lock.release()
 
         backoff = self.get_backoff(False)
-        sleeper = asyncio.ensure_future(asyncio.sleep(backoff))
+        sleeper: asyncio.Future = asyncio.ensure_future(asyncio.sleep(backoff))
         sleeper.add_done_callback(done_cb)
 
     async def __aenter__(self) -> None:

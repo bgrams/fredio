@@ -42,25 +42,25 @@ def mock_fred_response(method: str,
 
     response.status = status
 
-    reader = asyncio.Future()
+    reader: asyncio.Future = asyncio.Future()
     reader.set_result(response._body)  # noqa
 
     response.content = MagicMock()
     response.content.read = MagicMock()
     response.content.read.return_value = reader
-    response.read = MagicMock()
+    response.read = MagicMock()  # type: ignore
     response.read.return_value = reader
 
     response.reason = "Good"
 
-    response._headers = {
+    response._headers = {  # type: ignore
         "Content-Type": "application/json",
-        "Date": datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
+        "Date": datetime.datetime.utcnow().strftime(const.HEADER_DATE_FMT)
     }
 
     # Why
     if sys.version_info < (3, 8):
-        future = asyncio.Future()
+        future: asyncio.Future = asyncio.Future()
         future.set_result(response)
         return future
 
@@ -95,8 +95,9 @@ class TestApiClient(unittest.TestCase):
                        return_value: Any = None,
                        **kwargs):
 
+        url = URL(url or self.request_url)
         if return_value is None:
-            return_value = mock_fred_response(method, url or self.request_url, status)
+            return_value = mock_fred_response(method, url, status)
 
         return patch(
             "aiohttp.ClientSession._request",

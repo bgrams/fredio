@@ -29,11 +29,14 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install flake8 coverage
+        python -m pip install flake8 coverage mypy
         python -m pip install -e .
 
     - name: flake8
       run: flake8 . --count --statistics
+
+    - name: mypy
+      run: mypy
 
     - name: unittest coverage
       run: |

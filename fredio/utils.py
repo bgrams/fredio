@@ -34,9 +34,9 @@ def get_all_tasks() -> Set[asyncio.Task]:
     Get all tasks from main event loop
     """
     if sys.version_info < (3, 7, 0):
-        return asyncio.Task.all_tasks(loop=loop)
+        return asyncio.Task.all_tasks(loop=loop)  # type: ignore
     else:
-        return asyncio.all_tasks(loop=loop)
+        return asyncio.all_tasks(loop=loop)  # type: ignore
 
 
 def cancel_running_tasks() -> None:

@@ -5,14 +5,14 @@ __all__ = [
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Dict, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from . import utils
 
 
 logger = logging.getLogger(__name__)
 
-queue = asyncio.Queue()
+queue: asyncio.Queue = asyncio.Queue()
 
 _events: Dict[str, "Event"] = dict()
 _task: Optional[asyncio.Task] = None
@@ -23,7 +23,7 @@ class Event(object):
     def __init__(self, name: str):
         self.name = name
 
-        self._handlers = []
+        self._handlers: List[Callable] = []
         self._frozen = False
 
     def add(self, handler: Callable) -> None:
@@ -105,21 +105,14 @@ async def cancel(timeout: Optional[Union[float, int]] = None) -> None:
     global _task
 
     if running():
-
-        # What happens when a TimeoutError occurs?
-        # This is actually kinda odd since there's no logic to identify running tasks
-        # that have been started by the consumer.
-        # TODO: Ideally these can all be identified and cancelled.
-
         try:
-            logger.debug("Flushing %d remaining tasks (running: %d)"
-                         % (queue.qsize(), queue._unfinished_tasks))  # noqa
+            logger.debug("Flushing %d remaining tasks" % queue.qsize())
 
             await flush(timeout)
         except asyncio.TimeoutError as e:
             logger.exception(e)
         finally:
-            _task.cancel()
+            _task.cancel()  # type: ignore
             _task = None
 
 

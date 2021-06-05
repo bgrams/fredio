@@ -6,7 +6,7 @@ import logging
 import os
 import webbrowser
 from datetime import datetime
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from aiohttp import ClientSession, ClientResponse, ClientResponseError
 from yarl import URL
@@ -68,7 +68,7 @@ class ApiClient(object):
         # ClientSession is cached
         self._session_cls = ClientSession
         self._session_kws = frozenset(session_kws.items())
-        self._session = None
+        self._session: Optional[ClientSession] = None
 
     def __enter__(self):
         return self
@@ -83,7 +83,7 @@ class ApiClient(object):
     @property
     def session(self) -> ClientSession:
         self.start()
-        return self._session
+        return self._session  # type: ignore
 
     @classmethod
     def set_rate_limit(cls, limit: int = const.FRED_API_RATE_LIMIT):
@@ -113,7 +113,7 @@ class ApiClient(object):
         if exc.status == 429:
             hdr_time = datetime.strptime(
                 response.headers["Date"],
-                "%a, %d %b %Y %H:%M:%S GMT"
+                const.HEADER_DATE_FMT
             )
 
             backoff = self.ratelimiter.get_backoff(reltime=hdr_time.timestamp())
@@ -161,7 +161,9 @@ class ApiClient(object):
                         else:
                             raise
 
-    async def get(self, url: URL, retries: int = 0) -> List[Dict]:
+        return  # type: ignore
+
+    async def get(self, url: URL, retries: int = 0) -> utils.JSON_T:
         """
         Will await a single request to get the first batch of data before executing
         subsequent requests (if required) according to offset logic.
@@ -183,7 +185,7 @@ class ApiClient(object):
 
         if count or limit:
             coros = list(map(
-                lambda x: json(url.update_query(offset=x)),
+                lambda x: json(url.update_query(offset=x)),  # type: ignore
                 range(limit + offset, count, limit)
             ))
 
@@ -212,7 +214,7 @@ class _ApiDocs:
         if subpath:
             subpath += ".html"
 
-        return URL(const.FRED_DOC_URL) / subpath
+        return URL(const.FRED_DOC_URL) / subpath  # type: ignore
 
     def open(self) -> bool:
         return webbrowser.open(str(self._make_url()))
@@ -270,8 +272,8 @@ class Endpoint(object):
         res = await self.client.get(url, retries)
 
         if jsonpath:
-            mapped = map(engine.compile(jsonpath).execute, res)
-            return list(itertools.chain.from_iterable(mapped))
+            mapped = map(engine.compile(jsonpath).execute, res)  # type: ignore
+            return list(itertools.chain.from_iterable(mapped))  # type: ignore
         return res
 
     @utils.sharedoc(aget)

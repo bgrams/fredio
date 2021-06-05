@@ -44,3 +44,5 @@ FRED_DOC_URL = "https://fred.stlouisfed.org/docs/api/fred"
 FRED_API_RATE_LIMIT = 120
 FRED_API_RATE_RESET = 60
 FRED_API_FILE_TYPE = "json"  # other XML option but we dont want that
+
+HEADER_DATE_FMT = "%a, %d %b %Y %H:%M:%S GMT"
