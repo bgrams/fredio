@@ -70,6 +70,12 @@ class ApiClient(object):
         self._session_kws = frozenset(session_kws.items())
         self._session = None
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     @property
     def defaults(self):
         return self._defaults

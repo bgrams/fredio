@@ -86,7 +86,7 @@ class RateLimiter(object):
 
         def done_cb(_):
             logger.debug("Released lock from counter %d (elapsed %.4f)"
-                         % (self._timer.time() - ts, ct))
+                         % (ct, self._timer.time() - ts))
             self._lock.release()
 
         backoff = self.get_backoff(False)

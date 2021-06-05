@@ -116,10 +116,7 @@ async def main(client, interval=600):
         
 
 if __name__ == "__main__":
-    fred = fredio.configure(enable_events=True)
     
-    try:
+    with fredio.configure(enable_events=True) as fred:
         asyncio.run(main(fred))
-    finally:
-        fred.close()
 ```

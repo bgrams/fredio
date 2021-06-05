@@ -1,6 +1,5 @@
 import asyncio
 import unittest
-from typing import Type
 
 from fredio import locks
 from fredio import utils
@@ -10,7 +9,7 @@ from tests import async_test
 
 class _TestBase:
 
-    timer_t: Type[locks.Timer]
+    timer: locks.Timer
 
     period = 0.25
     rate = 2
@@ -20,7 +19,7 @@ class _TestBase:
         cls.loop = utils.loop
 
     def setUp(self):
-        self.ratelimiter = locks.RateLimiter(self.rate, self.period, timer=self.timer_t)
+        self.ratelimiter = locks.RateLimiter(self.rate, self.period, timer=self.timer)
 
     # Since the rate limiting refresh period has been set to 1, we know that the following
     # tests will result in (approximately) 1 and int(timestamp)
@@ -55,11 +54,11 @@ class _TestBase:
 
 
 class TestSystemRateLimiting(_TestBase, unittest.TestCase):
-    timer_t = locks.SystemTimer()
+    timer = locks.SystemTimer()
 
 
 class TestMonotonicRateLimiting(_TestBase, unittest.TestCase):
-    timer_t = locks.MonotonicTimer()
+    timer = locks.MonotonicTimer()
 
 
 if __name__ == "__main__":
