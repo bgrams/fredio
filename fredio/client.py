@@ -81,7 +81,6 @@ class ApiClient(object):
 
     @classmethod
     def set_rate_limit(cls, limit: int = const.FRED_API_RATE_LIMIT):
-        cls.ratelimiter.stop()
         cls.ratelimiter = locks.RateLimiter(limit=limit)
 
     def start(self) -> None:
@@ -91,8 +90,6 @@ class ApiClient(object):
         if self._session is None:
             logger.debug("Initializing %s" % self._session_cls.__name__)
             self._session = self._session_cls(**dict(self._session_kws))  # type: ignore
-
-        self.ratelimiter.start()
 
     def close(self) -> None:
         """
@@ -104,9 +101,9 @@ class ApiClient(object):
 
             self._session = None
 
-        self.ratelimiter.stop()
-
-    async def _handle_exception(self, response: ClientResponse, exc: ClientResponseError) -> None:
+    async def _handle_exception(self,
+                                response: ClientResponse,
+                                exc: ClientResponseError) -> None:
         if exc.status == 429:
             hdr_time = datetime.strptime(
                 response.headers["Date"],
@@ -161,8 +158,7 @@ class ApiClient(object):
     async def get(self, url: URL, retries: int = 0) -> List[Dict]:
         """
         Will await a single request to get the first batch of data before executing
-        subsequent requests (if required) according to offset logic. Jsonpath query
-        is optionally executed on json response data from each request.
+        subsequent requests (if required) according to offset logic.
 
         :param url: URL
         :param retries: Retry count, passed to Session.request
@@ -186,7 +182,7 @@ class ApiClient(object):
             ))
 
             logger.debug(
-                "Planning %s additional requests (count: %d limit %d offset %d)"
+                "Planning %s additional requests (count: %d limit: %d offset: %d)"
                 % (len(coros), count, limit, offset)
             )
 

@@ -12,8 +12,10 @@ from pandas import DataFrame
 from yarl import URL
 
 from fredio import configure
-from fredio import const, utils
+from fredio import const, locks, utils
 from fredio.client import ApiClient, Endpoint, get_client  # noqa
+
+from tests import async_test
 
 
 def mock_fred_response(method: str,
@@ -65,23 +67,26 @@ def mock_fred_response(method: str,
     return response
 
 
-def async_test(fn):
-    def tester(*args, **kwargs):
-        utils.loop.run_until_complete(fn(*args, **kwargs))
-    return tester
-
-
 class TestApiClient(unittest.TestCase):
 
     client: ApiClient
 
     def setUp(self) -> None:
+
         self.client = configure(api_key="foo")
         self.endpoint = Endpoint(client=self.client, path="")
         self.request_url = URL("https://api.stlouisfed.org/fred/?file_type=json&api_key=foo")
 
+        self.client.ratelimiter = locks.RateLimiter()
+
     def tearDown(self) -> None:
         self.client.close()
+
+        # Reset the RL
+        for task in utils.get_all_tasks():
+            task.cancel()
+
+        # self.client.ratelimiter._value = self._rl_value  # reset the RL
 
     def patchedRequest(self,
                        method: str = "GET",
@@ -107,8 +112,7 @@ class TestApiClient(unittest.TestCase):
         with self.patchedRequest() as req:
             await self.client.request("GET", self.request_url)
 
-            self.assertEqual(ratelim._value, ratelim._bound_value - 1)
-            self.assertEqual(len(ratelim._releases), 1)
+            self.assertEqual(ratelim._lock._value, ratelim._lock._bound_value - 1)
 
             req.assert_called_once()
 

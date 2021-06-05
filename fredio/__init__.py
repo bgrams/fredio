@@ -3,7 +3,7 @@ __all__ = ["configure", "shutdown", "client", "events"]
 import atexit
 from typing import Optional
 
-from . import client, events, locks, utils
+from . import client, events, utils
 
 
 def configure(api_key: Optional[str] = None,

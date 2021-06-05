@@ -23,6 +23,7 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8"
+        "Programming Language :: Python :: 3.9"
     ],
     url="https://github.com/bgrams/fredio",
     author="Brandon Grams",
@@ -33,7 +34,8 @@ setup(
         "aiohttp>=3.0,<4.0",
         "jsonpath-rw",
         "pandas",
-        "yarl>=1.0,<2.0"
+        "yarl>=1.0,<2.0",
+        "typing_extensions"
     ],
     test_suite="tests"
 )
