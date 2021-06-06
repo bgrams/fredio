@@ -6,7 +6,7 @@ import logging
 import os
 import webbrowser
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Type, TYPE_CHECKING
 
 from aiohttp import ClientSession, ClientResponse, ClientResponseError
 from yarl import URL
@@ -53,7 +53,11 @@ class ApiClient(object):
 
         return instance
 
-    def __init__(self, api_key: str, **session_kws):
+    def __init__(self,
+                 api_key: str,
+                 *,
+                 session_cls: Type[ClientSession] = ClientSession,
+                 **session_kws):
         """
         :param api_key: FRED API key
         :param session_kws: Keyword arguments passed to ClientSession
@@ -66,7 +70,7 @@ class ApiClient(object):
 
         # Lazy instantiation to be called within an async function
         # ClientSession is cached
-        self._session_cls = ClientSession
+        self._session_cls = session_cls
         self._session_kws = frozenset(session_kws.items())
         self._session: Optional[ClientSession] = None
 

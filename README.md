@@ -31,22 +31,26 @@ the extremely likely circumstance that these two clocks are even slightly out of
 pip install fredio
 ```
 
+### Development Status
+Alpha. Breaking changes should be expected for minor releases until v1, so please pin versions!
+
 ### Examples
 
 #### Standard synchronous usage
 
 ```python
+"""Pipeline to process series batches on-demand"""
+
 import fredio
 
 # Pass an api_key here, or set as FRED_API_KEY environment variable
-# This will also start a background Task for rate limiting
 client = fredio.configure()
 
-# open documentation for the /fred/series endpoint in the default browser
+# Open documentation for the /fred/series endpoint in the default browser
 client.series.observations.docs.open()
 
-# create a data pipeline to request US GDP data from the /series/observations
-# endpoint, clean the results, and write a csv to the local filesystem
+# Request US GDP data from the /series/observations endpoint, clean 
+# the results, and write a csv to the local filesystem
 (client.series.observations
 .get_pandas(
     series_id="GDP",
@@ -62,6 +66,8 @@ the main configuration function. The request Session will queue all successful H
 in the form of `(name, response)`, where `name` corresponds to the final path in the URL endpoint.
 
 ```python
+"""Pipeline to process series updates in near-real time"""
+
 import asyncio
 import datetime
 import fredio
@@ -120,3 +126,6 @@ if __name__ == "__main__":
     with fredio.configure(enable_events=True) as fred:
         asyncio.run(main(fred))
 ```
+
+### Related Projects
+[fred-fdw](https://github.com/bgrams/fred-fdw) - a PostgreSQL Foreign Data Wrapper for FRED
