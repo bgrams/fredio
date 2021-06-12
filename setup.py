@@ -9,7 +9,7 @@ with open(os.path.join(dirname, "README.md"), "r") as f:
 
 setup(
     name="fredio",
-    version="0.1.2",
+    version="0.2.0",
     description="Asynchronous python client for the FRED® API",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -22,7 +22,7 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8"
+        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9"
     ],
     url="https://github.com/bgrams/fredio",
